@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { TaskService, Task } from '../services/TaskService';
 import ChatBox from './ChatBox';
 
@@ -10,6 +10,7 @@ const TASK_STATUSES = ['pending', 'in_progress', 'completed'] as const;
 
 export default function TaskList({ projectId }: Props) {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
 
   useEffect(() => {
@@ -17,15 +18,18 @@ export default function TaskList({ projectId }: Props) {
   }, [projectId]);
 
   const loadTasks = async () => {
+    setLoading(true);
     try {
       const data = await TaskService.getTasks(projectId);
       setTasks(data);
     } catch (error) {
       console.error('Error loading tasks:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     try {
       await TaskService.createTask(projectId, title);
@@ -63,23 +67,29 @@ export default function TaskList({ projectId }: Props) {
         <button type="submit">Add</button>
       </form>
       <ul>
-        {tasks.map((t) => (
-          <li key={t.id} style={{ marginBottom: '5px' }}>
-            <span style={{ textDecoration: t.status === 'completed' ? 'line-through' : 'none' }}>
-              {t.title}
-            </span>
-            <select
-              value={t.status}
-              onChange={(e) => handleStatusChange(t.id, e.target.value)}
-              style={{ marginLeft: '8px', fontSize: '0.8em' }}
-            >
-              {TASK_STATUSES.map((s) => (
-                <option key={s} value={s}>{s.replace('_', ' ')}</option>
-              ))}
-            </select>
-            <button onClick={() => handleDelete(t.id)} style={{ marginLeft: '5px', color: 'red', fontSize: '0.8em' }}>Delete</button>
-          </li>
-        ))}
+        {loading ? (
+          <li style={{ color: '#888' }}>Loading tasks...</li>
+        ) : tasks.length === 0 ? (
+          <li style={{ color: '#888' }}>No tasks yet</li>
+        ) : (
+          tasks.map((t) => (
+            <li key={t.id} style={{ marginBottom: '5px' }}>
+              <span style={{ textDecoration: t.status === 'completed' ? 'line-through' : 'none' }}>
+                {t.title}
+              </span>
+              <select
+                value={t.status}
+                onChange={(e) => handleStatusChange(t.id, e.target.value)}
+                style={{ marginLeft: '8px', fontSize: '0.8em' }}
+              >
+                {TASK_STATUSES.map((s) => (
+                  <option key={s} value={s}>{s.replace('_', ' ')}</option>
+                ))}
+              </select>
+              <button onClick={() => handleDelete(t.id)} style={{ marginLeft: '5px', color: 'red', fontSize: '0.8em' }}>Delete</button>
+            </li>
+          ))
+        )}
       </ul>
       <ChatBox projectId={projectId} />
     </div>

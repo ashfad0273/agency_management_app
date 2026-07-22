@@ -1,4 +1,5 @@
 import { supabase } from '../api/supabaseClient';
+import { ProjectMemberService } from './ProjectMemberService';
 
 export interface Project {
   id: string;
@@ -34,6 +35,10 @@ export const ProjectService = {
       .single();
 
     if (error) throw error;
+
+    // Auto-add the creator as a project member
+    await ProjectMemberService.addMember(data.id, user.id, 'owner');
+
     return data as Project;
   },
 

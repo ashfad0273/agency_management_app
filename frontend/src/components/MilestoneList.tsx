@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { MilestoneService, Milestone } from '../services/MilestoneService';
 
 interface Props {
@@ -9,6 +9,7 @@ const MILESTONE_STATUSES = ['pending', 'in_progress', 'completed'] as const;
 
 export default function MilestoneList({ projectId }: Props) {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -18,15 +19,18 @@ export default function MilestoneList({ projectId }: Props) {
   }, [projectId]);
 
   const loadMilestones = async () => {
+    setLoading(true);
     try {
       const data = await MilestoneService.getMilestones(projectId);
       setMilestones(data);
     } catch (error) {
       console.error('Error loading milestones:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     try {
       await MilestoneService.createMilestone(projectId, name, description, dueDate);
@@ -73,27 +77,32 @@ export default function MilestoneList({ projectId }: Props) {
         <button type="submit">Add Milestone</button>
       </form>
       <ul>
-        {milestones.map((m) => (
-          <li key={m.id} style={{ marginBottom: '8px' }}>
-            <div>
-              <strong style={{ textDecoration: m.status === 'completed' ? 'line-through' : 'none' }}>{m.name}</strong>
-              {m.description && <span> — {m.description}</span>}
-              <br />
-              <small>Due: {formatDate(m.due_date)}</small>
-              <select
-                value={m.status}
-                onChange={(e) => handleStatusChange(m.id, e.target.value)}
-                style={{ marginLeft: '8px', fontSize: '0.8em' }}
-              >
-                {MILESTONE_STATUSES.map((s) => (
-                  <option key={s} value={s}>{s.replace('_', ' ')}</option>
-                ))}
-              </select>
-              <button onClick={() => handleDelete(m.id)} style={{ marginLeft: '5px', color: 'red', fontSize: '0.8em' }}>Delete</button>
-            </div>
-          </li>
-        ))}
-        {milestones.length === 0 && <li style={{ color: '#888' }}>No milestones yet</li>}
+        {loading ? (
+          <li style={{ color: '#888' }}>Loading milestones...</li>
+        ) : milestones.length === 0 ? (
+          <li style={{ color: '#888' }}>No milestones yet</li>
+        ) : (
+          milestones.map((m) => (
+            <li key={m.id} style={{ marginBottom: '8px' }}>
+              <div>
+                <strong style={{ textDecoration: m.status === 'completed' ? 'line-through' : 'none' }}>{m.name}</strong>
+                {m.description && <span> — {m.description}</span>}
+                <br />
+                <small>Due: {formatDate(m.due_date)}</small>
+                <select
+                  value={m.status}
+                  onChange={(e) => handleStatusChange(m.id, e.target.value)}
+                  style={{ marginLeft: '8px', fontSize: '0.8em' }}
+                >
+                  {MILESTONE_STATUSES.map((s) => (
+                    <option key={s} value={s}>{s.replace('_', ' ')}</option>
+                  ))}
+                </select>
+                <button onClick={() => handleDelete(m.id)} style={{ marginLeft: '5px', color: 'red', fontSize: '0.8em' }}>Delete</button>
+              </div>
+            </li>
+          ))
+        )}
       </ul>
     </div>
   );

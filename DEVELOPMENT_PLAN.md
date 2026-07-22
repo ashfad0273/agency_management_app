@@ -23,7 +23,7 @@ This document outlines the step-by-step development process to build a robust, s
 - [ ] **Unread Indicators:** Add logic to track message read status per user.
 
 ## Phase 4: Dynamic RBAC (Roles & Permissions)
-- [ ] **Permission Schema:** Expand `profiles` and `roles` tables to handle a granular Permission Matrix.
+- [ ] **Permission Schema:** Expand `profiles` and `roles` tables to handle a granular Permission Matrix. roles and profiles can be unlimited. there will be no fixed limit on the number of permissions. also the organization owner can add as much roles and profiles as needed.
 - [ ] **Permission Guard:** Build a middleware/hook (`usePermission`) that checks if a user has access to a feature (e.g., `can_delete_project`).
 - [ ] **Role Management UI:** Build the settings interface for Admins to customize roles.
 

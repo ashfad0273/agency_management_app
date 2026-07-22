@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { ProjectService, Project } from '../services/ProjectService';
+import { ChatService } from '../services/ChatService';
 
 import TaskList from './TaskList';
 import MilestoneList from './MilestoneList';
 
 export default function ProjectDashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -13,21 +15,47 @@ export default function ProjectDashboard() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     loadProjects();
   }, []);
 
+  // Fetch project unread counts whenever projects list changes
+  useEffect(() => {
+    if (projects.length === 0) return;
+    const fetchProjectUnreads = async () => {
+      const counts: Record<string, number> = {};
+      for (const p of projects) {
+        try {
+          const count = await ChatService.getUnreadCount(p.id);
+          if (count > 0) counts[p.id] = count;
+        } catch {
+          // ignore errors for individual project counts
+        }
+      }
+      setUnreadCounts(counts);
+    };
+
+    fetchProjectUnreads();
+    const interval = setInterval(fetchProjectUnreads, 15000);
+
+    return () => clearInterval(interval);
+  }, [projects]);
+
   const loadProjects = async () => {
+    setLoading(true);
     try {
       const data = await ProjectService.getProjects();
       setProjects(data);
     } catch (error) {
       console.error('Error loading projects:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     console.log("Attempting to create project:", name, description);
     try {
@@ -81,6 +109,15 @@ export default function ProjectDashboard() {
   const toggleTasks = (projectId: string) => {
     setSelectedProjectId(selectedProjectId === projectId ? null : projectId);
     setSelectedMilestoneProjectId(null);
+    // Clear the unread badge for this project when opening its chat/tasks
+    if (selectedProjectId !== projectId) {
+      ChatService.markAsRead(projectId);
+      setUnreadCounts((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+    }
   };
 
   const toggleMilestones = (projectId: string) => {
@@ -99,32 +136,57 @@ export default function ProjectDashboard() {
       </form>
 
       <ul>
-        {projects.map((p) => (
-          <li key={p.id} style={{ marginBottom: '10px' }}>
-            {editingProjectId === p.id ? (
-              <div style={{ marginBottom: '10px', padding: '10px', border: '1px solid #ccc', background: '#f9f9f9' }}>
-                <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Project Name" style={{ marginRight: '5px' }} />
-                <input value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="Description" style={{ marginRight: '5px' }} />
-                <button onClick={() => handleUpdate(p.id)} style={{ marginRight: '5px' }}>Save</button>
-                <button onClick={cancelEditing}>Cancel</button>
-              </div>
-            ) : (
-              <div>
-                <strong>{p.name}</strong> - {p.description}
-                <button onClick={() => startEditing(p)} style={{ marginLeft: '10px' }}>Edit</button>
-                <button onClick={() => handleDelete(p.id)} style={{ marginLeft: '5px', color: 'red' }}>Delete</button>
-                <button onClick={() => toggleTasks(p.id)} style={{ marginLeft: '5px' }}>
-                  {selectedProjectId === p.id ? 'Hide Tasks' : 'View Tasks'}
-                </button>
-                <button onClick={() => toggleMilestones(p.id)} style={{ marginLeft: '5px' }}>
-                  {selectedMilestoneProjectId === p.id ? 'Hide Milestones' : 'View Milestones'}
-                </button>
-                {selectedProjectId === p.id && <TaskList projectId={p.id} />}
-                {selectedMilestoneProjectId === p.id && <MilestoneList projectId={p.id} />}
-              </div>
-            )}
-          </li>
-        ))}
+        {loading ? (
+          <li style={{ color: '#888' }}>Loading projects...</li>
+        ) : projects.length === 0 ? (
+          <li style={{ color: '#888' }}>No projects yet. Create one above!</li>
+        ) : (
+          projects.map((p) => (
+            <li key={p.id} style={{ marginBottom: '10px' }}>
+              {editingProjectId === p.id ? (
+                <div style={{ marginBottom: '10px', padding: '10px', border: '1px solid #ccc', background: '#f9f9f9' }}>
+                  <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Project Name" style={{ marginRight: '5px' }} />
+                  <input value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="Description" style={{ marginRight: '5px' }} />
+                  <button onClick={() => handleUpdate(p.id)} style={{ marginRight: '5px' }}>Save</button>
+                  <button onClick={cancelEditing}>Cancel</button>
+                </div>
+              ) : (
+                <div>
+                  <strong>{p.name}</strong> - {p.description}
+                  <button onClick={() => startEditing(p)} style={{ marginLeft: '10px' }}>Edit</button>
+                  <button onClick={() => handleDelete(p.id)} style={{ marginLeft: '5px', color: 'red' }}>Delete</button>
+                  <button
+                    onClick={() => toggleTasks(p.id)}
+                    style={{ marginLeft: '5px', position: 'relative' }}
+                  >
+                    {selectedProjectId === p.id ? 'Hide Tasks' : 'View Tasks'}
+                    {unreadCounts[p.id] && selectedProjectId !== p.id && (
+                      <span style={{
+                        position: 'absolute',
+                        top: '-8px',
+                        right: '-12px',
+                        background: 'red',
+                        color: 'white',
+                        borderRadius: '50%',
+                        padding: '2px 6px',
+                        fontSize: '0.7em',
+                        fontWeight: 'bold',
+                        lineHeight: '1',
+                      }}>
+                        {unreadCounts[p.id] > 99 ? '99+' : unreadCounts[p.id]}
+                      </span>
+                    )}
+                  </button>
+                  <button onClick={() => toggleMilestones(p.id)} style={{ marginLeft: '5px' }}>
+                    {selectedMilestoneProjectId === p.id ? 'Hide Milestones' : 'View Milestones'}
+                  </button>
+                  {selectedProjectId === p.id && <TaskList projectId={p.id} />}
+                  {selectedMilestoneProjectId === p.id && <MilestoneList projectId={p.id} />}
+                </div>
+              )}
+            </li>
+          ))
+        )}
       </ul>
     </div>
   );
