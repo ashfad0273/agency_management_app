@@ -133,7 +133,7 @@ export const ChannelService = {
   async getMembers(channelId: string) {
     const { data, error } = await supabase
       .from('channel_members')
-      .select('*, profiles(email)')
+      .select('*, profiles:user_id(email)')
       .eq('channel_id', channelId);
 
     if (error) throw error;

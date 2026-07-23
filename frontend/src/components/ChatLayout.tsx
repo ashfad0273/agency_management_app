@@ -5,6 +5,8 @@ import { ConversationService, ConversationWithUser } from '../services/Conversat
 import { ProjectMemberService } from '../services/ProjectMemberService';
 import { Project } from '../services/ProjectService';
 import { ChatService } from '../services/ChatService';
+import { InviteService } from '../services/InviteService';
+import { usePermission, Permissions } from '../hooks/usePermission';
 
 type ActiveChat =
   | { type: 'channel'; channelId: string; channelName: string }
@@ -12,6 +14,10 @@ type ActiveChat =
   | { type: 'dm'; conversationId: string; otherUserName: string };
 
 export default function ChatLayout() {
+  const { can } = usePermission();
+  const canManageChannels = can(Permissions.Chat.ManageChannels);
+  const canInviteUsers = can(Permissions.User.Invite);
+
   const [activeChat, setActiveChat] = useState<ActiveChat>(() => ({
     type: 'channel',
     channelId: '',
@@ -29,6 +35,12 @@ export default function ChatLayout() {
   const [dmSearchQuery, setDmSearchQuery] = useState('');
   const [dmSearchResults, setDmSearchResults] = useState<{ id: string; email: string; display: string }[]>([]);
   const [searching, setSearching] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteLink, setInviteLink] = useState('');
+  const [inviteSending, setInviteSending] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
+  const [inviteEmailSent, setInviteEmailSent] = useState(false);
 
   const activeChannelId = activeChat.type === 'channel' ? activeChat.channelId : undefined;
   const activeProjectId = activeChat.type === 'project' ? activeChat.projectId : undefined;
@@ -124,9 +136,18 @@ export default function ChatLayout() {
   const loadData = async () => {
     try {
       const [channelData, conversationData, projectData] = await Promise.all([
-        ChannelService.getChannelsWithMembership(),
-        ConversationService.getConversations(),
-        ProjectMemberService.getUserProjects(),
+        ChannelService.getChannelsWithMembership().catch((err) => {
+          console.error('Error loading channels:', err);
+          return [];
+        }),
+        ConversationService.getConversations().catch((err) => {
+          console.error('Error loading conversations:', err);
+          return [];
+        }),
+        ProjectMemberService.getUserProjects().catch((err) => {
+          console.error('Error loading projects:', err);
+          return [];
+        }),
       ]);
       setChannels(channelData);
       setConversations(conversationData);
@@ -203,6 +224,26 @@ export default function ChatLayout() {
     }
   };
 
+  const handleInvite = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+    setInviteSending(true);
+    setInviteLink('');
+    setInviteEmailSent(false);
+    try {
+      const result = await InviteService.createInvitation(inviteEmail.trim());
+      setInviteLink(result.link);
+      setInviteEmailSent(result.emailSent);
+      if (result.emailSent) {
+        setInviteEmail('');
+      }
+    } catch (error) {
+      console.error('Error creating invitation:', error);
+      alert('Error creating invitation: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+    setInviteSending(false);
+  };
+
   const activeTitle = activeChat.type === 'channel'
     ? activeChat.channelName
     : activeChat.type === 'dm'
@@ -225,6 +266,85 @@ export default function ChatLayout() {
       }}>
         <h4 style={{ margin: '0 0 10px 0', fontSize: '0.95em', color: '#555' }}>Chats</h4>
 
+        {/* ======== Invite Section ======== */}
+        {canInviteUsers && (
+          <div style={{ marginBottom: '10px' }}>
+          <button
+            onClick={() => { setShowInvite(!showInvite); setInviteLink(''); }}
+            style={{
+              width: '100%',
+              padding: '6px 10px',
+              fontSize: '0.85em',
+              background: showInvite ? '#e8e8e8' : '#4a90d9',
+              color: showInvite ? '#333' : 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+            }}
+          >
+            {showInvite ? 'Cancel' : '+ Invite People'}
+          </button>
+
+          {showInvite && (
+            <form onSubmit={handleInvite} style={{
+              marginTop: '6px',
+              padding: '8px',
+              background: 'white',
+              border: '1px solid #ddd',
+              borderRadius: '4px',
+            }}>
+              <input
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="colleague@company.com"
+                type="email"
+                required
+                style={{ width: '100%', boxSizing: 'border-box', fontSize: '0.85em', padding: '4px 6px', marginBottom: '6px' }}
+              />
+              <button type="submit" disabled={inviteSending} style={{ fontSize: '0.8em', padding: '3px 8px' }}>
+                {inviteSending ? 'Creating...' : 'Send Invite'}
+              </button>
+
+              {inviteEmailSent && (
+                <p style={{ marginTop: '6px', fontSize: '0.8em', color: '#4a90d9' }}>
+                  ✓ Invitation email sent to {inviteEmail}!
+                </p>
+              )}
+
+              {inviteLink && !inviteEmailSent && (
+                <div style={{ marginTop: '8px', fontSize: '0.8em' }}>
+                  <p style={{ margin: '0 0 4px', color: '#555' }}>Share this link with {inviteEmail}:</p>
+                  <div style={{
+                    display: 'flex',
+                    gap: '4px',
+                    alignItems: 'center',
+                  }}>
+                    <input
+                      readOnly
+                      value={inviteLink}
+                      onClick={(e) => (e.target as HTMLInputElement).select()}
+                      style={{ flex: 1, fontSize: '0.85em', padding: '4px 6px', border: '1px solid #ccc', borderRadius: '3px' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(inviteLink);
+                        setInviteCopied(true);
+                        setTimeout(() => setInviteCopied(false), 2000);
+                      }}
+                      style={{ fontSize: '0.8em', padding: '4px 8px', whiteSpace: 'nowrap' }}
+                    >
+                      {inviteCopied ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </form>
+          )}
+        </div>
+        )}
+
         {/* ======== Channels Section ======== */}
         <div style={{ marginBottom: '8px' }}>
           <div style={{
@@ -234,22 +354,24 @@ export default function ChatLayout() {
             marginBottom: '6px',
           }}>
             <h5 style={{ margin: 0, fontSize: '0.8em', color: '#888', letterSpacing: '0.5px' }}>CHANNELS</h5>
-            <button
-              onClick={() => setShowCreateChannel(!showCreateChannel)}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: '#4a90d9',
-                fontSize: '1.2em',
-                fontWeight: 'bold',
-                padding: '0 4px',
-                lineHeight: '1',
-              }}
-              title="Create Channel"
-            >
-              +
-            </button>
+            {canManageChannels && (
+              <button
+                onClick={() => setShowCreateChannel(!showCreateChannel)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#4a90d9',
+                  fontSize: '1.2em',
+                  fontWeight: 'bold',
+                  padding: '0 4px',
+                  lineHeight: '1',
+                }}
+                title="Create Channel"
+              >
+                +
+              </button>
+            )}
           </div>
 
           {showCreateChannel && (

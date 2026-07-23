@@ -7,6 +7,7 @@ import Auth from './components/Auth';
 import ErrorBoundary from './components/ErrorBoundary';
 import ProjectsPage from './pages/ProjectsPage';
 import ChatPage from './pages/ChatPage';
+import SettingsPage from './pages/SettingsPage';
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -59,6 +60,15 @@ function App() {
         >
           Chat
         </Link>
+        <Link
+          to="/settings"
+          style={{
+            marginRight: '10px',
+            fontWeight: location.pathname.startsWith('/settings') ? 'bold' : 'normal',
+          }}
+        >
+          Settings
+        </Link>
         <button onClick={() => supabase.auth.signOut()}>Logout</button>
       </nav>
       <hr />
@@ -67,6 +77,7 @@ function App() {
         <Routes>
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/chat" element={<ChatPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/projects" replace />} />
         </Routes>
       </ErrorBoundary>

@@ -30,7 +30,7 @@ DROP POLICY IF EXISTS "Users can view channels in their org" ON channels;
 CREATE POLICY "Users can view channels in their org" ON channels
     FOR SELECT
     USING (
-        organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())
+        organization_id = public.get_user_organization_id()
         AND (
             is_private = false
             OR
@@ -44,32 +44,32 @@ CREATE POLICY "Users can view channels in their org" ON channels
 
 DROP POLICY IF EXISTS "Users can insert channels in their org" ON channels;
 CREATE POLICY "Users can insert channels in their org" ON channels
-    FOR INSERT WITH CHECK (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+    FOR INSERT WITH CHECK (organization_id = public.get_user_organization_id());
 
 DROP POLICY IF EXISTS "Users can update channels in their org" ON channels;
 CREATE POLICY "Users can update channels in their org" ON channels
-    FOR UPDATE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+    FOR UPDATE USING (organization_id = public.get_user_organization_id());
 
 DROP POLICY IF EXISTS "Users can delete channels in their org" ON channels;
 CREATE POLICY "Users can delete channels in their org" ON channels
-    FOR DELETE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+    FOR DELETE USING (organization_id = public.get_user_organization_id());
 
 -- Channel Members RLS Policies
 DROP POLICY IF EXISTS "Users can view channel members in their org" ON channel_members;
 CREATE POLICY "Users can view channel members in their org" ON channel_members
-    FOR SELECT USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+    FOR SELECT USING (organization_id = public.get_user_organization_id());
 
 DROP POLICY IF EXISTS "Users can insert channel members in their org" ON channel_members;
 CREATE POLICY "Users can insert channel members in their org" ON channel_members
-    FOR INSERT WITH CHECK (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+    FOR INSERT WITH CHECK (organization_id = public.get_user_organization_id());
 
 DROP POLICY IF EXISTS "Users can update channel members in their org" ON channel_members;
 CREATE POLICY "Users can update channel members in their org" ON channel_members
-    FOR UPDATE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+    FOR UPDATE USING (organization_id = public.get_user_organization_id());
 
 DROP POLICY IF EXISTS "Users can delete channel members in their org" ON channel_members;
 CREATE POLICY "Users can delete channel members in their org" ON channel_members
-    FOR DELETE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+    FOR DELETE USING (organization_id = public.get_user_organization_id());
 
 
 -- =============================================
@@ -98,33 +98,40 @@ DROP POLICY IF EXISTS "Users can view their conversations" ON conversations;
 CREATE POLICY "Users can view their conversations" ON conversations
     FOR SELECT
     USING (
-        organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())
-        AND EXISTS (
-            SELECT 1 FROM conversation_participants
-            WHERE conversation_participants.conversation_id = id
-            AND conversation_participants.user_id = auth.uid()
-        )
+        organization_id = public.get_user_organization_id()
+        AND public.is_conversation_participant(id, auth.uid())
     );
 
 DROP POLICY IF EXISTS "Users can insert conversations in their org" ON conversations;
 CREATE POLICY "Users can insert conversations in their org" ON conversations
-    FOR INSERT WITH CHECK (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+    FOR INSERT WITH CHECK (organization_id = public.get_user_organization_id());
+
+-- SECURITY DEFINER helper to avoid infinite recursion when checking conversation participation
+CREATE OR REPLACE FUNCTION public.is_conversation_participant(conv_id UUID, uid UUID)
+RETURNS BOOLEAN
+LANGUAGE SQL
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM conversation_participants
+    WHERE conversation_id = conv_id
+    AND user_id = uid
+  )
+$$;
 
 DROP POLICY IF EXISTS "Users can view conversation participants" ON conversation_participants;
 CREATE POLICY "Users can view conversation participants" ON conversation_participants
     FOR SELECT
     USING (
-        organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())
-        AND EXISTS (
-            SELECT 1 FROM conversation_participants cp2
-            WHERE cp2.conversation_id = conversation_participants.conversation_id
-            AND cp2.user_id = auth.uid()
-        )
+        organization_id = public.get_user_organization_id()
+        AND public.is_conversation_participant(conversation_id, auth.uid())
     );
 
 DROP POLICY IF EXISTS "Users can insert conversation participants" ON conversation_participants;
 CREATE POLICY "Users can insert conversation participants" ON conversation_participants
-    FOR INSERT WITH CHECK (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+    FOR INSERT WITH CHECK (organization_id = public.get_user_organization_id());
 
 
 -- =============================================
@@ -165,7 +172,7 @@ ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Users can view messages in their org or assigned projects" ON messages;
 CREATE POLICY "Users can view messages in their org or assigned projects" ON messages
 FOR SELECT USING (
-  organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())
+  organization_id = public.get_user_organization_id()
   AND (
     (channel_id IS NOT NULL AND EXISTS (
       SELECT 1 FROM channel_members
@@ -192,7 +199,7 @@ FOR SELECT USING (
 DROP POLICY IF EXISTS "Users can insert messages in their org or assigned projects" ON messages;
 CREATE POLICY "Users can insert messages in their org or assigned projects" ON messages
 FOR INSERT WITH CHECK (
-  organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())
+  organization_id = public.get_user_organization_id()
   AND (
     (channel_id IS NOT NULL AND EXISTS (
       SELECT 1 FROM channel_members
@@ -260,3 +267,50 @@ FOR INSERT WITH CHECK (user_id = auth.uid());
 DROP POLICY IF EXISTS "Users can update their own read receipts" ON message_reads;
 CREATE POLICY "Users can update their own read receipts" ON message_reads
 FOR UPDATE USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+-- Atomic upsert function for message read receipts to avoid race conditions (409 Conflicts)
+CREATE OR REPLACE FUNCTION public.upsert_message_read(
+  p_user_id UUID,
+  p_organization_id UUID,
+  p_project_id UUID DEFAULT NULL,
+  p_channel_id UUID DEFAULT NULL,
+  p_conversation_id UUID DEFAULT NULL
+) RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- Ensure users can only upsert their own read receipts
+  IF p_user_id != auth.uid() THEN
+    RAISE EXCEPTION 'Not allowed';
+  END IF;
+
+  LOOP
+    -- First try to update the existing row
+    UPDATE message_reads
+    SET last_read_at = now()
+    WHERE user_id = p_user_id
+    AND (
+      (p_project_id IS NOT NULL AND project_id = p_project_id AND channel_id IS NULL AND conversation_id IS NULL)
+      OR (p_channel_id IS NOT NULL AND channel_id = p_channel_id)
+      OR (p_conversation_id IS NOT NULL AND conversation_id = p_conversation_id)
+      OR (p_project_id IS NULL AND p_channel_id IS NULL AND p_conversation_id IS NULL
+          AND project_id IS NULL AND channel_id IS NULL AND conversation_id IS NULL)
+    );
+
+    IF FOUND THEN
+      RETURN;
+    END IF;
+
+    -- No existing row, try to insert
+    BEGIN
+      INSERT INTO message_reads (user_id, organization_id, project_id, channel_id, conversation_id, last_read_at)
+      VALUES (p_user_id, p_organization_id, p_project_id, p_channel_id, p_conversation_id, now());
+      RETURN;
+    EXCEPTION WHEN unique_violation THEN
+      -- Race condition: another session inserted concurrently; loop back to UPDATE
+    END;
+  END LOOP;
+END;
+$$;

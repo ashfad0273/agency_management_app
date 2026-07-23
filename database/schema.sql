@@ -59,6 +59,20 @@ CREATE TABLE IF NOT EXISTS project_members (
 );
 
 -- ========================
+-- Helper: SECURITY DEFINER function to avoid infinite recursion in RLS policies
+-- ========================
+
+CREATE OR REPLACE FUNCTION public.get_user_organization_id()
+RETURNS UUID
+LANGUAGE SQL
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT organization_id FROM profiles WHERE id = auth.uid()
+$$;
+
+-- ========================
 -- Row-Level Security (RLS)
 -- ========================
 
@@ -66,64 +80,112 @@ CREATE TABLE IF NOT EXISTS project_members (
 ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
 
 DO $$ BEGIN
-  CREATE POLICY "Users can view their own org" ON organizations FOR SELECT USING (id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can update their own org" ON organizations FOR UPDATE USING (id = (SELECT organization_id FROM profiles WHERE id = auth.uid())) WITH CHECK (id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can delete their own org" ON organizations FOR DELETE USING (id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+  CREATE POLICY "Users can view their own org" ON organizations FOR SELECT USING (id = public.get_user_organization_id());
+  CREATE POLICY "Users can update their own org" ON organizations FOR UPDATE USING (id = public.get_user_organization_id()) WITH CHECK (id = public.get_user_organization_id());
+  CREATE POLICY "Users can delete their own org" ON organizations FOR DELETE USING (id = public.get_user_organization_id());
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Profiles RLS
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
 DO $$ BEGIN
-  CREATE POLICY "Users can view profiles in their org" ON profiles FOR SELECT USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+  CREATE POLICY "Users can view profiles in their org" ON profiles FOR SELECT USING (organization_id = public.get_user_organization_id());
   CREATE POLICY "Users can insert their own profile" ON profiles FOR INSERT WITH CHECK (id = auth.uid());
-  CREATE POLICY "Users can update profiles in their org" ON profiles FOR UPDATE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())) WITH CHECK (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can delete profiles in their org" ON profiles FOR DELETE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+  CREATE POLICY "Users can update profiles in their org" ON profiles FOR UPDATE USING (organization_id = public.get_user_organization_id()) WITH CHECK (organization_id = public.get_user_organization_id());
+  CREATE POLICY "Users can delete profiles in their org" ON profiles FOR DELETE USING (organization_id = public.get_user_organization_id());
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Projects RLS
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 
 DO $$ BEGIN
-  CREATE POLICY "Users can view projects in their org" ON projects FOR SELECT USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can insert projects in their org" ON projects FOR INSERT WITH CHECK (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can update projects in their org" ON projects FOR UPDATE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())) WITH CHECK (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can delete projects in their org" ON projects FOR DELETE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+  CREATE POLICY "Users can view projects in their org" ON projects FOR SELECT USING (organization_id = public.get_user_organization_id());
+  CREATE POLICY "Users can insert projects in their org" ON projects FOR INSERT WITH CHECK (organization_id = public.get_user_organization_id());
+  CREATE POLICY "Users can update projects in their org" ON projects FOR UPDATE USING (organization_id = public.get_user_organization_id()) WITH CHECK (organization_id = public.get_user_organization_id());
+  CREATE POLICY "Users can delete projects in their org" ON projects FOR DELETE USING (organization_id = public.get_user_organization_id());
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Tasks RLS
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
 
 DO $$ BEGIN
-  CREATE POLICY "Users can view tasks in their org" ON tasks FOR SELECT USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can insert tasks in their org" ON tasks FOR INSERT WITH CHECK (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can update tasks in their org" ON tasks FOR UPDATE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can delete tasks in their org" ON tasks FOR DELETE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+  CREATE POLICY "Users can view tasks in their org" ON tasks FOR SELECT USING (organization_id = public.get_user_organization_id());
+  CREATE POLICY "Users can insert tasks in their org" ON tasks FOR INSERT WITH CHECK (organization_id = public.get_user_organization_id());
+  CREATE POLICY "Users can update tasks in their org" ON tasks FOR UPDATE USING (organization_id = public.get_user_organization_id());
+  CREATE POLICY "Users can delete tasks in their org" ON tasks FOR DELETE USING (organization_id = public.get_user_organization_id());
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Milestones RLS
 ALTER TABLE milestones ENABLE ROW LEVEL SECURITY;
 
 DO $$ BEGIN
-  CREATE POLICY "Users can view milestones in their org" ON milestones FOR SELECT USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can insert milestones in their org" ON milestones FOR INSERT WITH CHECK (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can update milestones in their org" ON milestones FOR UPDATE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can delete milestones in their org" ON milestones FOR DELETE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+  CREATE POLICY "Users can view milestones in their org" ON milestones FOR SELECT USING (organization_id = public.get_user_organization_id());
+  CREATE POLICY "Users can insert milestones in their org" ON milestones FOR INSERT WITH CHECK (organization_id = public.get_user_organization_id());
+  CREATE POLICY "Users can update milestones in their org" ON milestones FOR UPDATE USING (organization_id = public.get_user_organization_id());
+  CREATE POLICY "Users can delete milestones in their org" ON milestones FOR DELETE USING (organization_id = public.get_user_organization_id());
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Project Members RLS
 ALTER TABLE project_members ENABLE ROW LEVEL SECURITY;
 
 DO $$ BEGIN
-  CREATE POLICY "Users can view project members in their org" ON project_members FOR SELECT USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can insert project members in their org" ON project_members FOR INSERT WITH CHECK (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can update project members in their org" ON project_members FOR UPDATE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())) WITH CHECK (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
-  CREATE POLICY "Users can delete project members in their org" ON project_members FOR DELETE USING (organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid()));
+  CREATE POLICY "Users can view project members in their org" ON project_members FOR SELECT USING (organization_id = public.get_user_organization_id());
+  CREATE POLICY "Users can insert project members in their org" ON project_members FOR INSERT WITH CHECK (organization_id = public.get_user_organization_id());
+  CREATE POLICY "Users can update project members in their org" ON project_members FOR UPDATE USING (organization_id = public.get_user_organization_id()) WITH CHECK (organization_id = public.get_user_organization_id());
+  CREATE POLICY "Users can delete project members in their org" ON project_members FOR DELETE USING (organization_id = public.get_user_organization_id());
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- =============================================
--- Auto-Create Organization & Profile on Signup
+-- 7. Invitations Table
 -- =============================================
+CREATE TABLE IF NOT EXISTS invitations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+    organization_name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    token TEXT NOT NULL UNIQUE DEFAULT gen_random_uuid()::text,
+    invited_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+    role TEXT DEFAULT 'employee',
+    status TEXT DEFAULT 'pending',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now() + interval '7 days') NOT NULL
+);
+
+-- SECURITY DEFINER helper: look up an invitation by token (used during signup, before login)
+CREATE OR REPLACE FUNCTION public.get_invite_by_token(p_token TEXT)
+RETURNS TABLE (organization_name TEXT, email TEXT)
+LANGUAGE SQL
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT inv.organization_name, inv.email
+  FROM invitations inv
+  WHERE inv.token = p_token
+  AND inv.status = 'pending'
+  AND inv.expires_at > now()
+  LIMIT 1
+$$;
+
+ALTER TABLE invitations ENABLE ROW LEVEL SECURITY;
+
+-- Authenticated users: view invites in their org
+DROP POLICY IF EXISTS "Users can view invites in their org" ON invitations;
+CREATE POLICY "Users can view invites in their org" ON invitations
+  FOR SELECT USING (organization_id = public.get_user_organization_id());
+
+-- Authenticated users: create invites in their org
+DROP POLICY IF EXISTS "Users can create invites in their org" ON invitations;
+CREATE POLICY "Users can create invites in their org" ON invitations
+  FOR INSERT WITH CHECK (organization_id = public.get_user_organization_id());
+
+-- Authenticated users: update (cancel) invites they created
+DROP POLICY IF EXISTS "Users can update invites they created" ON invitations;
+CREATE POLICY "Users can update invites they created" ON invitations
+  FOR UPDATE USING (invited_by = auth.uid()) WITH CHECK (invited_by = auth.uid());
+
+-- =============================================
+-- Auto-Create Organization & Profile on Signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -133,31 +195,65 @@ DECLARE
   org_id UUID;
   org_name TEXT;
   channel_id UUID;
+  invite_token TEXT;
+  invite_record RECORD;
 BEGIN
-  -- Use the user's email domain as org name, or a default
-  org_name := COALESCE(
-    NEW.raw_user_meta_data ->> 'organization_name',
-    split_part(NEW.email, '@', 2),
-    'My Organization'
-  );
+  -- Check if user came through an invite
+  invite_token := NEW.raw_user_meta_data ->> 'invite_token';
 
-  -- Create organization
-  INSERT INTO public.organizations (name, domain)
-  VALUES (org_name, NEW.email)
-  RETURNING id INTO org_id;
+  IF invite_token IS NOT NULL THEN
+    -- Look up the pending invitation
+    SELECT * INTO invite_record FROM public.invitations
+    WHERE token = invite_token
+    AND email = NEW.email
+    AND status = 'pending'
+    AND expires_at > now();
 
-  -- Create profile with admin role
+    IF FOUND THEN
+      org_id := invite_record.organization_id;
+      -- Mark invitation as accepted
+      UPDATE public.invitations SET status = 'accepted' WHERE id = invite_record.id;
+    ELSE
+      -- Invalid or expired token — fall back to creating a new org
+      org_name := split_part(NEW.email, '@', 2);
+      INSERT INTO public.organizations (name, domain)
+      VALUES (org_name, NEW.email)
+      RETURNING id INTO org_id;
+    END IF;
+  ELSE
+    -- No invite, create a new org (existing behavior)
+    org_name := COALESCE(
+      NEW.raw_user_meta_data ->> 'organization_name',
+      split_part(NEW.email, '@', 2),
+      'My Organization'
+    );
+
+    INSERT INTO public.organizations (name, domain)
+    VALUES (org_name, NEW.email)
+    RETURNING id INTO org_id;
+  END IF;
+
+  -- Create profile with the resolved organization
   INSERT INTO public.profiles (id, organization_id, email, role)
-  VALUES (NEW.id, org_id, NEW.email, 'admin');
+  VALUES (NEW.id, org_id, NEW.email, CASE WHEN invite_token IS NOT NULL THEN 'employee' ELSE 'admin' END);
 
-  -- Create #general channel for the org
+  -- Create #general channel for the org (if it doesn't exist yet)
   INSERT INTO public.channels (organization_id, name, description, created_by)
   VALUES (org_id, 'general', 'General discussion', NEW.id)
+  ON CONFLICT (organization_id, name) DO NOTHING
   RETURNING id INTO channel_id;
 
   -- Add the creator as a member of #general
+  -- If the channel already existed, fetch its id
+  IF channel_id IS NULL THEN
+    SELECT id INTO channel_id FROM public.channels
+    WHERE organization_id = org_id AND name = 'general';
+  END IF;
+
+  -- Add user as member of #general (safe if already a member)
   INSERT INTO public.channel_members (channel_id, user_id, organization_id, role)
-  VALUES (channel_id, NEW.id, org_id, 'admin');
+  VALUES (channel_id, NEW.id, org_id, 'member')
+  ON CONFLICT (channel_id, user_id) DO NOTHING;
 
   RETURN NEW;
 END;

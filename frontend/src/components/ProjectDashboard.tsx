@@ -1,11 +1,17 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { ProjectService, Project } from '../services/ProjectService';
 import { ChatService } from '../services/ChatService';
+import { usePermission, Permissions } from '../hooks/usePermission';
 
 import TaskList from './TaskList';
 import MilestoneList from './MilestoneList';
 
 export default function ProjectDashboard() {
+  const { can } = usePermission();
+  const canCreate = can(Permissions.Project.Create);
+  const canUpdate = can(Permissions.Project.Update);
+  const canDelete = can(Permissions.Project.Delete);
+
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
@@ -129,11 +135,13 @@ export default function ProjectDashboard() {
     <div style={{ padding: '20px' }}>
       <h2>Projects</h2>
       
-      <form onSubmit={handleCreate} style={{ marginBottom: '20px' }}>
-        <input placeholder="Project Name" value={name} onChange={(e) => setName(e.target.value)} required />
-        <input placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
-        <button type="submit">Create Project</button>
-      </form>
+      {canCreate && (
+        <form onSubmit={handleCreate} style={{ marginBottom: '20px' }}>
+          <input placeholder="Project Name" value={name} onChange={(e) => setName(e.target.value)} required />
+          <input placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
+          <button type="submit">Create Project</button>
+        </form>
+      )}
 
       <ul>
         {loading ? (
@@ -153,8 +161,12 @@ export default function ProjectDashboard() {
               ) : (
                 <div>
                   <strong>{p.name}</strong> - {p.description}
-                  <button onClick={() => startEditing(p)} style={{ marginLeft: '10px' }}>Edit</button>
-                  <button onClick={() => handleDelete(p.id)} style={{ marginLeft: '5px', color: 'red' }}>Delete</button>
+                  {canUpdate && (
+                    <button onClick={() => startEditing(p)} style={{ marginLeft: '10px' }}>Edit</button>
+                  )}
+                  {canDelete && (
+                    <button onClick={() => handleDelete(p.id)} style={{ marginLeft: '5px', color: 'red' }}>Delete</button>
+                  )}
                   <button
                     onClick={() => toggleTasks(p.id)}
                     style={{ marginLeft: '5px', position: 'relative' }}

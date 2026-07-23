@@ -25,7 +25,7 @@ export const ChatService = {
   ) {
     let query = supabase
       .from('messages')
-      .select('*, profiles(email)')
+      .select('*, profiles:sender_id(email)')
       .order('created_at', { ascending: true });
 
     if (conversationId) {
@@ -104,52 +104,14 @@ export const ChatService = {
 
     if (!profile) return;
 
-    const now = new Date().toISOString();
-
-    // Find existing read receipt for this scope
-    let query = supabase
-      .from('message_reads')
-      .select('id')
-      .eq('user_id', user.id);
-
-    if (conversationId) {
-      query = query.eq('conversation_id', conversationId);
-    } else if (channelId) {
-      query = query.eq('channel_id', channelId);
-    } else if (projectId === null) {
-      query = query.is('project_id', null).is('channel_id', null).is('conversation_id', null);
-    } else if (projectId) {
-      query = query.eq('project_id', projectId);
-    }
-
-    const { data: existing } = await query.maybeSingle();
-
-    if (existing) {
-      await supabase
-        .from('message_reads')
-        .update({ last_read_at: now })
-        .eq('id', existing.id);
-    } else {
-      const insertData: Record<string, any> = {
-        user_id: user.id,
-        organization_id: profile.organization_id,
-        last_read_at: now,
-      };
-
-      if (conversationId) {
-        insertData.conversation_id = conversationId;
-      } else if (channelId) {
-        insertData.channel_id = channelId;
-      } else if (projectId === null) {
-        // Global scope
-      } else if (projectId) {
-        insertData.project_id = projectId;
-      }
-
-      await supabase
-        .from('message_reads')
-        .insert([insertData]);
-    }
+    // Use the atomic upsert function to avoid race conditions
+    await supabase.rpc('upsert_message_read', {
+      p_user_id: user.id,
+      p_organization_id: profile.organization_id,
+      p_project_id: projectId ?? null,
+      p_channel_id: channelId ?? null,
+      p_conversation_id: conversationId ?? null,
+    });
   },
 
   /** Get the number of unread messages for a scope */
