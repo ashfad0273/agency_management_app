@@ -20,6 +20,8 @@ export interface Project {
   name: string;
   description: string | null;
   organization_id: string;
+  status: string;
+  deadline: string | null;
 }
 
 export const ProjectMemberService = {
@@ -28,17 +30,18 @@ export const ProjectMemberService = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('No user logged in');
 
-    // Join project_members with projects to get project details
     const { data, error } = await supabase
       .from('project_members')
-      .select('project_id, projects!inner(id, name, description, organization_id)')
+      .select('project_id, projects!inner(id, name, description, organization_id, status, deadline)')
       .eq('user_id', user.id);
 
     if (error) throw error;
     if (!data) return [];
 
-    // Extract the nested project data
-    return data.map((item: { projects: Project }) => item.projects);
+    return data.map((item: any) => {
+      const p = Array.isArray(item.projects) ? item.projects[0] : item.projects;
+      return p as Project;
+    });
   },
 
   /** Check if the current user is a member of a specific project */
@@ -100,5 +103,56 @@ export const ProjectMemberService = {
 
     if (error) throw error;
     return data as ProjectMember[];
+  },
+
+  /** Get all members of a project with profile info */
+  async getMembersWithProfiles(projectId: string): Promise<Array<{ id: string; user_id: string; role: string; email: string | null }>> {
+    const { data, error } = await supabase
+      .from('project_members')
+      .select('id, user_id, role')
+      .eq('project_id', projectId);
+
+    if (error) throw error;
+
+    const userIds = [...new Set((data ?? []).map(m => m.user_id))];
+    let emailMap: Record<string, string | null> = {};
+    if (userIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, email')
+        .in('id', userIds);
+      for (const p of profiles ?? []) {
+        emailMap[p.id] = p.email;
+      }
+    }
+
+    return (data ?? []).map(m => ({
+      id: m.id,
+      user_id: m.user_id,
+      role: m.role,
+      email: emailMap[m.user_id] ?? null,
+    }));
+  },
+
+  /** Get all org members (profiles) for multi-select */
+  async getOrgMembers(): Promise<Array<{ id: string; email: string | null }>> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('No user logged in');
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', user.id)
+      .single();
+
+    if (!profile) throw new Error('Profile not found');
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, email')
+      .eq('organization_id', profile.organization_id);
+
+    if (error) throw error;
+    return data ?? [];
   },
 };

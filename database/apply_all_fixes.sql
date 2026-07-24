@@ -56,6 +56,12 @@ DROP POLICY IF EXISTS "Users can update invites they created" ON invitations;
 CREATE POLICY "Users can update invites they created" ON invitations
   FOR UPDATE USING (invited_by = auth.uid()) WITH CHECK (invited_by = auth.uid());
 
+-- ============================================
+-- FIX 5: Add status and deadline to projects
+-- ============================================
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS deadline DATE;
+
 
 -- ============================================
 -- FIX 2: Updated handle_new_user trigger

@@ -15,9 +15,9 @@ export interface Database {
         Update: { id?: string; organization_id?: string; email?: string | null; role?: string; role_id?: string | null; created_at?: string };
       };
       projects: {
-        Row: { id: string; organization_id: string; name: string; description: string | null; created_at: string };
-        Insert: { id?: string; organization_id: string; name: string; description?: string | null; created_at?: string };
-        Update: { id?: string; organization_id?: string; name?: string; description?: string | null; created_at?: string };
+        Row: { id: string; organization_id: string; name: string; description: string | null; status: string; deadline: string | null; created_at: string };
+        Insert: { id?: string; organization_id: string; name: string; description?: string | null; status?: string; deadline?: string | null; created_at?: string };
+        Update: { id?: string; organization_id?: string; name?: string; description?: string | null; status?: string; deadline?: string | null; created_at?: string };
       };
       tasks: {
         Row: { id: string; project_id: string; organization_id: string; title: string; status: string; created_at: string };

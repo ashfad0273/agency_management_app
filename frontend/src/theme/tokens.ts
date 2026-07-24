@@ -45,6 +45,7 @@ export const radius = {
 export const navHeight = 48;
 export const statusBarHeight = 28;
 export const sidebarWidth = 220;
+export const sidebarCollapsedWidth = 56;
 
 export const gridBackground: CSSProperties = {
   backgroundColor: tokens.canvasBg,
@@ -218,6 +219,10 @@ style.textContent = `
   @keyframes slide-down {
     from { opacity: 0; transform: translateY(-12px) scale(0.98); }
     to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes slide-in-right {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
   }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }

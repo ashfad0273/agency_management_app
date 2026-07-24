@@ -6,12 +6,28 @@ export interface Project {
   name: string;
   description: string | null;
   organization_id: string;
+  status: string;
+  deadline: string | null;
+}
+
+export interface ProjectCardData extends Project {
+  memberCount: number;
+  members: { id: string; email: string | null }[];
+  taskCount: number;
+  completedTaskCount: number;
+}
+
+export interface CreateProjectInput {
+  name: string;
+  description?: string;
+  deadline?: string | null;
+  memberIds?: string[];
+  initialTasks?: string[];
+  initialMilestones?: { name: string; due_date?: string }[];
 }
 
 export const ProjectService = {
-  // Create a new project
-  async createProject(name: string, description: string) {
-    // Get current user's profile to know their organization_id
+  async createProject(input: CreateProjectInput) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('No user logged in');
 
@@ -23,42 +39,134 @@ export const ProjectService = {
 
     if (!profile) throw new Error('Profile not found');
 
-    // Insert with the organization_id explicitly included
     const { data, error } = await supabase
       .from('projects')
       .insert([{
-        name,
-        description,
-        organization_id: profile.organization_id
+        name: input.name,
+        description: input.description || null,
+        deadline: input.deadline || null,
+        organization_id: profile.organization_id,
       }])
       .select()
       .single();
 
     if (error) throw error;
+    const project = data as Project;
 
-    // Auto-add the creator as a project member; rollback if it fails
     try {
-      await ProjectMemberService.addMember(data.id, user.id, 'owner');
+      await ProjectMemberService.addMember(project.id, user.id, 'owner');
     } catch (memberErr) {
-      await supabase.from('projects').delete().eq('id', data.id);
+      await supabase.from('projects').delete().eq('id', project.id);
       throw new Error('Failed to add you as project member. Project creation rolled back.');
     }
 
-    return data as Project;
+    if (input.memberIds && input.memberIds.length > 0) {
+      for (const uid of input.memberIds) {
+        if (uid !== user.id) {
+          try {
+            await ProjectMemberService.addMember(project.id, uid, 'member');
+          } catch {
+            // skip individual failures
+          }
+        }
+      }
+    }
+
+    if (input.initialTasks && input.initialTasks.length > 0) {
+      const taskRows = input.initialTasks
+        .filter(t => t.trim())
+        .map(title => ({
+          project_id: project.id,
+          title,
+          organization_id: profile.organization_id,
+        }));
+      if (taskRows.length > 0) {
+        await supabase.from('tasks').insert(taskRows);
+      }
+    }
+
+    if (input.initialMilestones && input.initialMilestones.length > 0) {
+      const msRows = input.initialMilestones
+        .filter(m => m.name.trim())
+        .map(m => ({
+          project_id: project.id,
+          name: m.name,
+          due_date: m.due_date || null,
+          organization_id: profile.organization_id,
+        }));
+      if (msRows.length > 0) {
+        await supabase.from('milestones').insert(msRows);
+      }
+    }
+
+    return project;
   },
 
-  // Get projects (RLS handles the filtering automatically)
   async getProjects() {
     const { data, error } = await supabase
       .from('projects')
-      .select('*');
+      .select('*')
+      .order('created_at', { ascending: false });
 
     if (error) throw error;
     return data as Project[];
   },
 
-  // Update a project
-  async updateProject(id: string, fields: { name?: string; description?: string }) {
+  async getProjectsWithDetails(): Promise<ProjectCardData[]> {
+    const projects = await this.getProjects();
+    if (projects.length === 0) return [];
+
+    const ids = projects.map(p => p.id);
+
+    // Fetch members and profiles in separate queries for reliability
+    const { data: members } = await supabase
+      .from('project_members')
+      .select('project_id, user_id')
+      .in('project_id', ids);
+
+    const userIds = [...new Set((members ?? []).map(m => m.user_id))];
+    let emailMap: Record<string, string | null> = {};
+    if (userIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, email')
+        .in('id', userIds);
+      for (const p of profiles ?? []) {
+        emailMap[p.id] = p.email;
+      }
+    }
+
+    const { data: tasks } = await supabase
+      .from('tasks')
+      .select('project_id, id, status')
+      .in('project_id', ids);
+
+    const membersByProject: Record<string, { id: string; email: string | null }[]> = {};
+    for (const m of members ?? []) {
+      if (!membersByProject[m.project_id]) membersByProject[m.project_id] = [];
+      membersByProject[m.project_id].push({
+        id: m.user_id,
+        email: emailMap[m.user_id] ?? null,
+      });
+    }
+
+    const taskCounts: Record<string, { total: number; completed: number }> = {};
+    for (const t of tasks ?? []) {
+      if (!taskCounts[t.project_id]) taskCounts[t.project_id] = { total: 0, completed: 0 };
+      taskCounts[t.project_id].total++;
+      if (t.status === 'completed') taskCounts[t.project_id].completed++;
+    }
+
+    return projects.map(p => ({
+      ...p,
+      memberCount: membersByProject[p.id]?.length ?? 0,
+      members: membersByProject[p.id] ?? [],
+      taskCount: taskCounts[p.id]?.total ?? 0,
+      completedTaskCount: taskCounts[p.id]?.completed ?? 0,
+    }));
+  },
+
+  async updateProject(id: string, fields: { name?: string; description?: string | null; status?: string; deadline?: string | null }) {
     const { data, error } = await supabase
       .from('projects')
       .update(fields)
@@ -70,7 +178,6 @@ export const ProjectService = {
     return data as Project;
   },
 
-  // Delete a project
   async deleteProject(id: string) {
     const { error } = await supabase
       .from('projects')
@@ -78,5 +185,5 @@ export const ProjectService = {
       .eq('id', id);
 
     if (error) throw error;
-  }
+  },
 };

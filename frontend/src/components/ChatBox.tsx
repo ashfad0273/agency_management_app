@@ -14,12 +14,19 @@ function ChatBox({ projectId, channelId, conversationId, title }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
   const senderNamesRef = useRef(senderNames);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { senderNamesRef.current = senderNames; }, [senderNames]);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setCurrentUserId(data.user?.id ?? null);
+    });
+  }, []);
 
   const displayTitle = title ?? (
     conversationId ? 'Direct Message' :
@@ -121,6 +128,13 @@ function ChatBox({ projectId, channelId, conversationId, title }: Props) {
     }
   };
 
+  const formatTime = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const hours = d.getHours().toString().padStart(2, '0');
+    const mins = d.getMinutes().toString().padStart(2, '0');
+    return `${hours}:${mins}`;
+  };
+
   return (
     <div style={{
       display: 'flex',
@@ -142,7 +156,13 @@ function ChatBox({ projectId, channelId, conversationId, title }: Props) {
       </div>
 
       {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: '16px 16px 24px',
+        display: 'flex',
+        flexDirection: 'column',
+      }}>
         {loading ? (
           <div style={{ ...sharedStyles.textMuted, textAlign: 'center', padding: 40 }}>
             Loading messages...
@@ -153,27 +173,55 @@ function ChatBox({ projectId, channelId, conversationId, title }: Props) {
           </div>
         ) : (
           <div role="log" aria-live="polite" aria-label="Message list">
-            {messages.map((m) => (
-              <div key={m.id} style={{
-                marginBottom: 8,
-                padding: '8px 12px',
-                borderRadius: radius.sm,
-                background: tokens.canvasBg,
-                border: `1px solid ${tokens.borderDefault}`,
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <strong style={{ color: tokens.accentPrimary, fontSize: fontSize.sm }}>
-                    {getDisplayName(m)}
-                  </strong>
-                  <span style={{ color: tokens.textDim, fontSize: fontSize.xs }}>
-                    {new Date(m.created_at).toLocaleTimeString()}
-                  </span>
+            {messages.map((m) => {
+              const isOwn = m.sender_id === currentUserId;
+              return (
+                <div key={m.id} style={{
+                  display: 'flex',
+                  justifyContent: isOwn ? 'flex-end' : 'flex-start',
+                  marginBottom: 6,
+                }}>
+                  <div style={{
+                    maxWidth: '70%',
+                    padding: '8px 12px',
+                    borderRadius: radius.md,
+                    background: isOwn ? 'rgba(58, 149, 154, 0.2)' : tokens.canvasBg,
+                    border: `1px solid ${isOwn ? 'rgba(58, 149, 154, 0.3)' : tokens.borderDefault}`,
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 8,
+                      marginBottom: 2,
+                    }}>
+                      <strong style={{
+                        color: isOwn ? tokens.accentPrimary : tokens.textSecondary,
+                        fontSize: fontSize.xs,
+                        fontWeight: 600,
+                      }}>
+                        {isOwn ? 'You' : getDisplayName(m)}
+                      </strong>
+                      <span style={{
+                        color: tokens.textDim,
+                        fontSize: fontSize.xs,
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {formatTime(m.created_at)}
+                      </span>
+                    </div>
+                    <div style={{
+                      color: tokens.textPrimary,
+                      fontSize: fontSize.base,
+                      lineHeight: 1.5,
+                      wordBreak: 'break-word',
+                    }}>
+                      {m.content}
+                    </div>
+                  </div>
                 </div>
-                <div style={{ color: tokens.textPrimary, fontSize: fontSize.base, lineHeight: 1.5 }}>
-                  {m.content}
-                </div>
-              </div>
-            ))}
+              );
+            })}
             <div ref={messagesEndRef} />
           </div>
         )}

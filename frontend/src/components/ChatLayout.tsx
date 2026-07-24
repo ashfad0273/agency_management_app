@@ -1,11 +1,10 @@
-import { useState, useEffect, useRef, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import ChatBox from './ChatBox';
 import { ChannelService, ChannelWithMembership } from '../services/ChannelService';
 import { ConversationService, ConversationWithUser } from '../services/ConversationService';
 import { ProjectMemberService } from '../services/ProjectMemberService';
 import { Project } from '../services/ProjectService';
 import { ChatService } from '../services/ChatService';
-import { InviteService } from '../services/InviteService';
 import { usePermission, Permissions } from '../hooks/usePermission';
 import { tokens, sharedStyles, radius, fontSize } from '../theme/tokens';
 
@@ -17,7 +16,6 @@ type ActiveChat =
 export default function ChatLayout() {
   const { can } = usePermission();
   const canManageChannels = can(Permissions.Chat.ManageChannels);
-  const canInviteUsers = can(Permissions.User.Invite);
 
   const [activeChat, setActiveChat] = useState<ActiveChat>(() => ({
     type: 'channel',
@@ -36,25 +34,14 @@ export default function ChatLayout() {
   const [dmSearchQuery, setDmSearchQuery] = useState('');
   const [dmSearchResults, setDmSearchResults] = useState<{ id: string; email: string; display: string }[]>([]);
   const [searching, setSearching] = useState(false);
-  const [showInvite, setShowInvite] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteLink, setInviteLink] = useState('');
-  const [inviteSending, setInviteSending] = useState(false);
-  const [inviteCopied, setInviteCopied] = useState(false);
-  const [inviteEmailSent, setInviteEmailSent] = useState(false);
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'error'; message: string } | null>(null);
   const [creatingChannel, setCreatingChannel] = useState(false);
-  const inviteTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const showFeedback = (type: 'error', message: string) => {
     setFeedback({ type, message });
     setTimeout(() => setFeedback(null), 3000);
   };
-
-  useEffect(() => {
-    return () => { if (inviteTimerRef.current) clearTimeout(inviteTimerRef.current); };
-  }, []);
 
   const activeChannelId = activeChat.type === 'channel' ? (activeChat.channelId || undefined) : undefined;
   const activeProjectId = activeChat.type === 'project' ? activeChat.projectId : undefined;
@@ -200,24 +187,6 @@ export default function ChatLayout() {
     }
   };
 
-  const handleInvite = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!inviteEmail.trim()) return;
-    setInviteSending(true);
-    setInviteLink('');
-    setInviteEmailSent(false);
-    try {
-      const result = await InviteService.createInvitation(inviteEmail.trim());
-      setInviteLink(result.link);
-      setInviteEmailSent(result.emailSent);
-      if (result.emailSent) setInviteEmail('');
-    } catch (error) {
-      console.error('Error creating invitation:', error);
-      showFeedback('error', 'Error creating invitation: ' + (error instanceof Error ? error.message : 'Unknown error'));
-    }
-    setInviteSending(false);
-  };
-
   const activeTitle = activeChat.type === 'channel'
     ? activeChat.channelName
     : activeChat.type === 'dm'
@@ -289,98 +258,6 @@ export default function ChatLayout() {
         )}
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
-          {/* Invite Section */}
-          {canInviteUsers && (
-            <div style={{ marginBottom: 10 }}>
-              <button
-                onClick={() => { setShowInvite(prev => !prev); setInviteLink(''); }}
-                style={{
-                  width: '100%',
-                  padding: '7px 10px',
-                  fontSize: fontSize.sm,
-                  background: showInvite ? tokens.surfaceHover : tokens.accentPrimary,
-                  color: showInvite ? tokens.textSecondary : '#fff',
-                  border: 'none',
-                  borderRadius: radius.sm,
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                {showInvite ? 'Cancel' : '+ Invite People'}
-              </button>
-
-              {showInvite && (
-                <form onSubmit={handleInvite} style={{
-                  marginTop: 8,
-                  padding: 10,
-                  background: tokens.surfaceFloat,
-                  border: `1px solid ${tokens.borderDefault}`,
-                  borderRadius: radius.sm,
-                }}>
-                  <input
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    placeholder="colleague@company.com"
-                    type="email"
-                    required
-                    style={{ ...sharedStyles.input, marginBottom: 6, fontSize: fontSize.sm }}
-                  />
-                  <button type="submit" disabled={inviteSending} style={{
-                    ...sharedStyles.btnPrimary,
-                    width: '100%',
-                    fontSize: fontSize.sm,
-                    padding: '6px 10px',
-                    opacity: inviteSending ? 0.6 : 1,
-                  }}>
-                    {inviteSending ? 'Creating...' : 'Send Invite'}
-                  </button>
-
-                  {inviteEmailSent && (
-                    <p style={{ margin: '6px 0 0', fontSize: fontSize.xs, color: tokens.accentPrimary }}>
-                      ✓ Invitation email sent to {inviteEmail}!
-                    </p>
-                  )}
-
-                  {inviteLink && !inviteEmailSent && (
-                    <div style={{ marginTop: 8, fontSize: fontSize.xs }}>
-                      <p style={{ margin: '0 0 4px', color: tokens.textDim }}>Share this link:</p>
-                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                        <input
-                          readOnly
-                          value={inviteLink}
-                          onClick={(e) => (e.target as HTMLInputElement).select()}
-                          style={{ ...sharedStyles.input, flex: 1, fontSize: fontSize.xs, padding: '4px 6px' }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(inviteLink);
-                            setInviteCopied(true);
-                            if (inviteTimerRef.current) clearTimeout(inviteTimerRef.current);
-                            inviteTimerRef.current = setTimeout(() => setInviteCopied(false), 2000);
-                          }}
-                          style={{
-                            padding: '4px 8px',
-                            fontSize: fontSize.xs,
-                            background: tokens.accentPrimary,
-                            color: '#fff',
-                            border: 'none',
-                            borderRadius: radius.sm,
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {inviteCopied ? 'Copied!' : 'Copy'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </form>
-              )}
-            </div>
-          )}
-
           {/* Channels */}
           <div style={{ marginBottom: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
