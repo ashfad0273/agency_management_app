@@ -36,8 +36,13 @@ export const ProjectService = {
 
     if (error) throw error;
 
-    // Auto-add the creator as a project member
-    await ProjectMemberService.addMember(data.id, user.id, 'owner');
+    // Auto-add the creator as a project member; rollback if it fails
+    try {
+      await ProjectMemberService.addMember(data.id, user.id, 'owner');
+    } catch (memberErr) {
+      await supabase.from('projects').delete().eq('id', data.id);
+      throw new Error('Failed to add you as project member. Project creation rolled back.');
+    }
 
     return data as Project;
   },

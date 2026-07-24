@@ -1,5 +1,12 @@
 -- ============================================================
 -- APPLY ALL FIXES - Run this entire file in Supabase SQL Editor
+--
+-- ORDER: Run schema.sql → chat_schema.sql → rbac_schema.sql (optional)
+--        → apply_all_fixes.sql
+--
+-- This file is safe to run at any point and will not overwrite
+-- existing role definitions. It conditionally seeds default roles
+-- only if the RBAC extension has been applied.
 -- ============================================================
 
 -- ============================================
@@ -88,6 +95,10 @@ BEGIN
       INSERT INTO public.organizations (name, domain)
       VALUES (org_name, NEW.email)
       RETURNING id INTO org_id;
+      -- Seed default roles if RBAC schema has been applied
+      IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'seed_default_roles') THEN
+        PERFORM public.seed_default_roles(org_id);
+      END IF;
     END IF;
   ELSE
     -- No invite, create a new org (existing behavior)
@@ -100,6 +111,11 @@ BEGIN
     INSERT INTO public.organizations (name, domain)
     VALUES (org_name, NEW.email)
     RETURNING id INTO org_id;
+
+    -- Seed default roles if RBAC schema has been applied
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'seed_default_roles') THEN
+      PERFORM public.seed_default_roles(org_id);
+    END IF;
   END IF;
 
   -- Create profile with the resolved organization

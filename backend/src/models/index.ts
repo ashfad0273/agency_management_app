@@ -9,6 +9,7 @@ export interface Organization {
   name: string;
   domain: string | null;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface Profile {
@@ -17,6 +18,7 @@ export interface Profile {
   email: string | null;
   role: string;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface Project {
@@ -25,4 +27,5 @@ export interface Project {
   name: string;
   description: string | null;
   created_at: string;
+  updated_at?: string;
 }

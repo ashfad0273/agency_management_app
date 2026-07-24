@@ -5,6 +5,7 @@ import { usePermission, Permissions } from '../hooks/usePermission';
 
 import TaskList from './TaskList';
 import MilestoneList from './MilestoneList';
+import { tokens, sharedStyles, radius, fontSize, spacing } from '../theme/tokens';
 
 export default function ProjectDashboard() {
   const { can } = usePermission();
@@ -22,12 +23,20 @@ export default function ProjectDashboard() {
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [savingProjectId, setSavingProjectId] = useState<string | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+
+  const showFeedback = (type: 'success' | 'error', message: string) => {
+    setFeedback({ type, message });
+    setTimeout(() => setFeedback(null), 3000);
+  };
 
   useEffect(() => {
     loadProjects();
   }, []);
 
-  // Fetch project unread counts whenever projects list changes
   useEffect(() => {
     if (projects.length === 0) return;
     const fetchProjectUnreads = async () => {
@@ -37,7 +46,6 @@ export default function ProjectDashboard() {
           const count = await ChatService.getUnreadCount(p.id);
           if (count > 0) counts[p.id] = count;
         } catch {
-          // ignore errors for individual project counts
         }
       }
       setUnreadCounts(counts);
@@ -63,17 +71,17 @@ export default function ProjectDashboard() {
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
-    console.log("Attempting to create project:", name, description);
+    setCreating(true);
     try {
-      const newProject = await ProjectService.createProject(name, description);
-      console.log("Project created:", newProject);
+      await ProjectService.createProject(name, description);
       setName('');
       setDescription('');
-      loadProjects(); // Refresh list
+      loadProjects();
     } catch (error) {
       console.error('Error creating project:', error);
-      alert('Error creating project: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      showFeedback('error', 'Error creating project: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
+    setCreating(false);
   };
 
   const startEditing = (project: Project) => {
@@ -89,18 +97,21 @@ export default function ProjectDashboard() {
   };
 
   const handleUpdate = async (id: string) => {
+    setSavingProjectId(id);
     try {
       await ProjectService.updateProject(id, { name: editName, description: editDescription });
       setEditingProjectId(null);
       loadProjects();
     } catch (error) {
       console.error('Error updating project:', error);
-      alert('Error updating project: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      showFeedback('error', 'Error updating project: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
+    setSavingProjectId(null);
   };
 
   const handleDelete = async (id: string) => {
     if (!window.confirm('Are you sure you want to delete this project? This action cannot be undone.')) return;
+    setDeletingProjectId(id);
     try {
       await ProjectService.deleteProject(id);
       if (selectedProjectId === id) setSelectedProjectId(null);
@@ -108,14 +119,14 @@ export default function ProjectDashboard() {
       loadProjects();
     } catch (error) {
       console.error('Error deleting project:', error);
-      alert('Error deleting project: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      showFeedback('error', 'Error deleting project: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
+    setDeletingProjectId(null);
   };
 
   const toggleTasks = (projectId: string) => {
     setSelectedProjectId(selectedProjectId === projectId ? null : projectId);
     setSelectedMilestoneProjectId(null);
-    // Clear the unread badge for this project when opening its chat/tasks
     if (selectedProjectId !== projectId) {
       ChatService.markAsRead(projectId);
       setUnreadCounts((prev) => {
@@ -131,75 +142,143 @@ export default function ProjectDashboard() {
     setSelectedProjectId(null);
   };
 
+  const btnPrimary = {
+    background: tokens.accentPrimary,
+    color: '#fff',
+    border: `1px solid ${tokens.accentPrimary}`,
+    borderRadius: radius.sm,
+    padding: '6px 14px',
+    fontSize: fontSize.sm,
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  };
+
+  const btnGhost = {
+    background: 'transparent',
+    color: tokens.textSecondary,
+    border: `1px solid ${tokens.borderDefault}`,
+    borderRadius: radius.sm,
+    padding: '4px 10px',
+    fontSize: fontSize.sm,
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  };
+
   return (
-    <div style={{ padding: '20px' }}>
-      <h2>Projects</h2>
-      
+    <div>
+      <h2 style={{ color: tokens.textPrimary, fontSize: fontSize.lg, fontWeight: 600, margin: '0 0 20px' }}>Projects</h2>
+
+      {feedback && (
+        <div style={sharedStyles.feedbackBanner(feedback.type)}>
+          {feedback.message}
+        </div>
+      )}
+
       {canCreate && (
-        <form onSubmit={handleCreate} style={{ marginBottom: '20px' }}>
-          <input placeholder="Project Name" value={name} onChange={(e) => setName(e.target.value)} required />
-          <input placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
-          <button type="submit">Create Project</button>
+        <form onSubmit={handleCreate} style={{ marginBottom: 20, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            placeholder="Project Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            style={{ ...sharedStyles.input, width: 'auto', flex: '1 1 200px' }}
+          />
+          <input
+            placeholder="Description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            style={{ ...sharedStyles.input, width: 'auto', flex: '1 1 200px' }}
+          />
+          <button type="submit" disabled={creating} style={{ ...btnPrimary, opacity: creating ? 0.6 : 1 }}>
+            {creating ? 'Creating...' : 'Create Project'}
+          </button>
         </form>
       )}
 
-      <ul>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {loading ? (
-          <li style={{ color: '#888' }}>Loading projects...</li>
+          <div style={{ ...sharedStyles.textMuted, padding: 20, textAlign: 'center' }}>
+            <div style={{ ...sharedStyles.shimmer, height: 20, width: '60%', margin: '0 auto 8px' }} />
+            <div style={{ ...sharedStyles.shimmer, height: 20, width: '40%', margin: '0 auto' }} />
+          </div>
         ) : projects.length === 0 ? (
-          <li style={{ color: '#888' }}>No projects yet. Create one above!</li>
+          <div style={{ ...sharedStyles.textMuted, padding: 40, textAlign: 'center' }}>
+            No projects yet. Create one above!
+          </div>
         ) : (
           projects.map((p) => (
-            <li key={p.id} style={{ marginBottom: '10px' }}>
+            <div key={p.id} style={sharedStyles.card}>
               {editingProjectId === p.id ? (
-                <div style={{ marginBottom: '10px', padding: '10px', border: '1px solid #ccc', background: '#f9f9f9' }}>
-                  <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Project Name" style={{ marginRight: '5px' }} />
-                  <input value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="Description" style={{ marginRight: '5px' }} />
-                  <button onClick={() => handleUpdate(p.id)} style={{ marginRight: '5px' }}>Save</button>
-                  <button onClick={cancelEditing}>Cancel</button>
+                <div style={{ padding: spacing.lg }}>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                    <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Project Name" style={{ ...sharedStyles.input, width: 'auto', flex: 1 }} />
+                    <input value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="Description" style={{ ...sharedStyles.input, width: 'auto', flex: 1 }} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => handleUpdate(p.id)} disabled={savingProjectId === p.id} style={{ ...btnPrimary, opacity: savingProjectId === p.id ? 0.6 : 1 }}>
+                      {savingProjectId === p.id ? 'Saving...' : 'Save'}
+                    </button>
+                    <button onClick={cancelEditing} style={btnGhost}>Cancel</button>
+                  </div>
                 </div>
               ) : (
-                <div>
-                  <strong>{p.name}</strong> - {p.description}
-                  {canUpdate && (
-                    <button onClick={() => startEditing(p)} style={{ marginLeft: '10px' }}>Edit</button>
-                  )}
-                  {canDelete && (
-                    <button onClick={() => handleDelete(p.id)} style={{ marginLeft: '5px', color: 'red' }}>Delete</button>
-                  )}
-                  <button
-                    onClick={() => toggleTasks(p.id)}
-                    style={{ marginLeft: '5px', position: 'relative' }}
-                  >
-                    {selectedProjectId === p.id ? 'Hide Tasks' : 'View Tasks'}
-                    {unreadCounts[p.id] && selectedProjectId !== p.id && (
-                      <span style={{
-                        position: 'absolute',
-                        top: '-8px',
-                        right: '-12px',
-                        background: 'red',
-                        color: 'white',
-                        borderRadius: '50%',
-                        padding: '2px 6px',
-                        fontSize: '0.7em',
-                        fontWeight: 'bold',
-                        lineHeight: '1',
-                      }}>
-                        {unreadCounts[p.id] > 99 ? '99+' : unreadCounts[p.id]}
-                      </span>
+                <div style={{ padding: spacing.lg }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div>
+                      <strong style={{ color: tokens.textPrimary, fontSize: fontSize.md }}>{p.name}</strong>
+                      {p.description && <span style={{ color: tokens.textSecondary, fontSize: fontSize.base, marginLeft: 8 }}>— {p.description}</span>}
+                    </div>
+                    <div style={{ fontSize: fontSize.sm, color: tokens.textDim }}>
+                      {p.organization_id.substring(0, 8)}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button
+                      onClick={() => toggleTasks(p.id)}
+                      style={{
+                        ...btnGhost,
+                        background: selectedProjectId === p.id ? tokens.accentMuted : 'transparent',
+                        borderColor: selectedProjectId === p.id ? tokens.accentPrimary : tokens.borderDefault,
+                        color: selectedProjectId === p.id ? tokens.accentPrimary : tokens.textSecondary,
+                        position: 'relative',
+                      }}
+                    >
+                      {selectedProjectId === p.id ? 'Hide Tasks' : 'Tasks'}
+                      {unreadCounts[p.id] && selectedProjectId !== p.id && (
+                        <span style={sharedStyles.unreadBadge}>
+                          {unreadCounts[p.id] > 99 ? '99+' : unreadCounts[p.id]}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => toggleMilestones(p.id)}
+                      style={{
+                        ...btnGhost,
+                        background: selectedMilestoneProjectId === p.id ? tokens.accentMuted : 'transparent',
+                        borderColor: selectedMilestoneProjectId === p.id ? tokens.accentPrimary : tokens.borderDefault,
+                        color: selectedMilestoneProjectId === p.id ? tokens.accentPrimary : tokens.textSecondary,
+                      }}
+                    >
+                      {selectedMilestoneProjectId === p.id ? 'Hide Milestones' : 'Milestones'}
+                    </button>
+                    {canUpdate && (
+                      <button onClick={() => startEditing(p)} style={btnGhost}>Edit</button>
                     )}
-                  </button>
-                  <button onClick={() => toggleMilestones(p.id)} style={{ marginLeft: '5px' }}>
-                    {selectedMilestoneProjectId === p.id ? 'Hide Milestones' : 'View Milestones'}
-                  </button>
+                    {canDelete && (
+                      <button onClick={() => handleDelete(p.id)} disabled={deletingProjectId === p.id} style={{ ...sharedStyles.btnDanger, opacity: deletingProjectId === p.id ? 0.6 : 1 }}>
+                        {deletingProjectId === p.id ? 'Deleting...' : 'Delete'}
+                      </button>
+                    )}
+                  </div>
                   {selectedProjectId === p.id && <TaskList projectId={p.id} />}
                   {selectedMilestoneProjectId === p.id && <MilestoneList projectId={p.id} />}
                 </div>
               )}
-            </li>
+            </div>
           ))
         )}
-      </ul>
+      </div>
     </div>
   );
 }

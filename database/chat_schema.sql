@@ -153,6 +153,15 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES project
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS channel_id UUID REFERENCES channels(id) ON DELETE CASCADE;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE;
 
+-- Ensure exactly one scope column (or all null for global messages)
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_scope_check;
+ALTER TABLE messages ADD CONSTRAINT messages_scope_check CHECK (
+  (project_id IS NOT NULL AND channel_id IS NULL AND conversation_id IS NULL)
+  OR (project_id IS NULL AND channel_id IS NOT NULL AND conversation_id IS NULL)
+  OR (project_id IS NULL AND channel_id IS NULL AND conversation_id IS NOT NULL)
+  OR (project_id IS NULL AND channel_id IS NULL AND conversation_id IS NULL)
+);
+
 -- Enable Realtime
 DO $$
 BEGIN
@@ -167,6 +176,20 @@ BEGIN
 END $$;
 
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+
+-- Performance Indexes for Chat Tables
+CREATE INDEX IF NOT EXISTS idx_messages_organization_id ON messages(organization_id);
+CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id);
+CREATE INDEX IF NOT EXISTS idx_messages_project_id ON messages(project_id);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_channel_members_organization_id ON channel_members(organization_id);
+CREATE INDEX IF NOT EXISTS idx_channel_members_channel_id ON channel_members(channel_id);
+CREATE INDEX IF NOT EXISTS idx_channel_members_user_id ON channel_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_conversation_participants_organization_id ON conversation_participants(organization_id);
+CREATE INDEX IF NOT EXISTS idx_conversation_participants_conversation_id ON conversation_participants(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_conversation_participants_user_id ON conversation_participants(user_id);
 
 -- Messages RLS Policies
 DROP POLICY IF EXISTS "Users can view messages in their org or assigned projects" ON messages;
@@ -292,7 +315,7 @@ BEGIN
     SET last_read_at = now()
     WHERE user_id = p_user_id
     AND (
-      (p_project_id IS NOT NULL AND project_id = p_project_id AND channel_id IS NULL AND conversation_id IS NULL)
+      (p_project_id IS NOT NULL AND project_id = p_project_id)
       OR (p_channel_id IS NOT NULL AND channel_id = p_channel_id)
       OR (p_conversation_id IS NOT NULL AND conversation_id = p_conversation_id)
       OR (p_project_id IS NULL AND p_channel_id IS NULL AND p_conversation_id IS NULL

@@ -38,7 +38,7 @@ export const ProjectMemberService = {
     if (!data) return [];
 
     // Extract the nested project data
-    return data.map((item: any) => item.projects as Project);
+    return data.map((item: { projects: Project }) => item.projects);
   },
 
   /** Check if the current user is a member of a specific project */

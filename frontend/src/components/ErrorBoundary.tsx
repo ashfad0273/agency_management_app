@@ -1,4 +1,5 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
+import { tokens, radius, fontSize } from '../theme/tokens';
 
 interface Props {
   children: ReactNode;
@@ -10,10 +11,6 @@ interface State {
   error: Error | null;
 }
 
-/**
- * Error boundary that catches JavaScript errors anywhere in its child
- * component tree and displays a fallback UI instead of crashing the whole app.
- */
 export default class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
@@ -36,19 +33,30 @@ export default class ErrorBoundary extends Component<Props, State> {
 
       return (
         <div style={{
-          padding: '20px',
-          margin: '20px',
-          border: '1px solid #e74c3c',
-          borderRadius: '6px',
-          background: '#fdf0ef',
+          padding: 24,
+          margin: 24,
+          border: `1px solid ${tokens.danger}`,
+          borderRadius: radius.md,
+          background: `rgba(239, 68, 68, 0.05)`,
+          maxWidth: 600,
         }}>
-          <h2 style={{ color: '#c0392b', margin: '0 0 8px' }}>Something went wrong</h2>
-          <p style={{ color: '#666', margin: '0 0 12px' }}>
+          <h2 style={{ color: tokens.danger, margin: '0 0 8px', fontSize: fontSize.lg }}>
+            Something went wrong
+          </h2>
+          <p style={{ color: tokens.textSecondary, margin: '0 0 12px', fontSize: fontSize.base }}>
             An unexpected error occurred. Please try refreshing the page.
           </p>
-          <details style={{ fontSize: '0.85em', color: '#888' }}>
-            <summary>Error details</summary>
-            <pre style={{ marginTop: '8px', whiteSpace: 'pre-wrap' }}>
+          <details style={{ fontSize: fontSize.sm, color: tokens.textDim }}>
+            <summary style={{ cursor: 'pointer', color: tokens.textSecondary }}>Error details</summary>
+            <pre style={{
+              marginTop: 8,
+              whiteSpace: 'pre-wrap',
+              background: tokens.surfaceInset,
+              padding: 12,
+              borderRadius: radius.sm,
+              border: `1px solid ${tokens.borderDefault}`,
+              color: tokens.textPrimary,
+            }}>
               {this.state.error?.message}
             </pre>
           </details>
@@ -58,13 +66,16 @@ export default class ErrorBoundary extends Component<Props, State> {
               window.location.reload();
             }}
             style={{
-              marginTop: '12px',
-              padding: '8px 16px',
-              background: '#c0392b',
-              color: 'white',
+              marginTop: 12,
+              padding: '10px 20px',
+              background: tokens.danger,
+              color: '#fff',
               border: 'none',
-              borderRadius: '4px',
+              borderRadius: radius.sm,
               cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: fontSize.base,
+              transition: 'background 0.15s ease',
             }}
           >
             Reload page

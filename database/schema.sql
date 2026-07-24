@@ -73,6 +73,19 @@ AS $$
 $$;
 
 -- ========================
+-- Performance Indexes on Foreign Key Columns
+-- ========================
+CREATE INDEX IF NOT EXISTS idx_profiles_organization_id ON profiles(organization_id);
+CREATE INDEX IF NOT EXISTS idx_projects_organization_id ON projects(organization_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_organization_id ON tasks(organization_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);
+CREATE INDEX IF NOT EXISTS idx_milestones_organization_id ON milestones(organization_id);
+CREATE INDEX IF NOT EXISTS idx_milestones_project_id ON milestones(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_members_organization_id ON project_members(organization_id);
+CREATE INDEX IF NOT EXISTS idx_project_members_project_id ON project_members(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_members_user_id ON project_members(user_id);
+
+-- ========================
 -- Row-Level Security (RLS)
 -- ========================
 
@@ -183,6 +196,34 @@ CREATE POLICY "Users can create invites in their org" ON invitations
 DROP POLICY IF EXISTS "Users can update invites they created" ON invitations;
 CREATE POLICY "Users can update invites they created" ON invitations
   FOR UPDATE USING (invited_by = auth.uid()) WITH CHECK (invited_by = auth.uid());
+
+-- =============================================
+-- Channel tables (needed by handle_new_user trigger below).
+-- If chat_schema.sql has already run, these are no-ops.
+-- =============================================
+CREATE TABLE IF NOT EXISTS channels (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+    is_private BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    UNIQUE(organization_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS channel_members (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    channel_id UUID REFERENCES channels(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+    organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+    role TEXT DEFAULT 'member',
+    joined_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    UNIQUE(channel_id, user_id)
+);
+
+ALTER TABLE channels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE channel_members ENABLE ROW LEVEL SECURITY;
 
 -- =============================================
 -- Auto-Create Organization & Profile on Signup

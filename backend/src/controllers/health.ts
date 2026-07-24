@@ -48,6 +48,10 @@ export async function getMyProfile(
     .single();
 
   if (error) {
+    if (error.code === 'PGRST116') {
+      res.status(404).json({ error: 'Profile not found' });
+      return;
+    }
     res.status(500).json({ error: 'Failed to fetch profile' });
     return;
   }

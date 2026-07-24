@@ -34,37 +34,34 @@ export const RoleService = {
     return data as Role[];
   },
 
-  /** Get roles with user counts */
+  /** Get roles with user counts — 3 queries total regardless of role count */
   async getRolesWithUserCounts(): Promise<RoleWithPermissions[]> {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('No user logged in');
-
     const roles = await this.getRoles();
 
-    // Get user counts for each role and fetch permissions
-    const rolesWithDetails = await Promise.all(
-      roles.map(async (role) => {
-        // Get user count
-        const { count } = await supabase
-          .from('profiles')
-          .select('*', { count: 'exact', head: true })
-          .eq('role_id', role.id);
+    // Count profiles per role_id in a single query
+    const { data: allProfiles } = await supabase
+      .from('profiles')
+      .select('role_id');
+    const userCounts: Record<string, number> = {};
+    for (const p of allProfiles ?? []) {
+      if (p.role_id) userCounts[p.role_id] = (userCounts[p.role_id] || 0) + 1;
+    }
 
-        // Get permissions for this role
-        const { data: perms } = await supabase
-          .from('role_permissions')
-          .select('permission_key')
-          .eq('role_id', role.id);
+    // Fetch all permissions for all roles at once
+    const { data: allPerms } = await supabase
+      .from('role_permissions')
+      .select('role_id, permission_key');
+    const permsByRole: Record<string, string[]> = {};
+    for (const p of allPerms ?? []) {
+      if (!permsByRole[p.role_id]) permsByRole[p.role_id] = [];
+      permsByRole[p.role_id].push(p.permission_key);
+    }
 
-        return {
-          ...role,
-          user_count: count ?? 0,
-          permissions: perms?.map(p => p.permission_key) ?? [],
-        };
-      })
-    );
-
-    return rolesWithDetails as RoleWithPermissions[];
+    return roles.map((role) => ({
+      ...role,
+      user_count: userCounts[role.id] ?? 0,
+      permissions: permsByRole[role.id] ?? [],
+    })) as RoleWithPermissions[];
   },
 
   /** Get all available permission keys */
@@ -127,27 +124,33 @@ export const RoleService = {
     if (error) throw error;
   },
 
-  /** Set permissions for a role (replaces all existing) */
+  /** Set permissions for a role (incremental — only adds/removes what changed) */
   async setRolePermissions(roleId: string, permissionKeys: string[]): Promise<void> {
-    // First, delete all existing permissions for this role
-    const { error: deleteError } = await supabase
+    const { data: existing } = await supabase
       .from('role_permissions')
-      .delete()
+      .select('permission_key')
       .eq('role_id', roleId);
 
-    if (deleteError) throw deleteError;
+    const existingSet = new Set(existing?.map(p => p.permission_key) ?? []);
+    const newSet = new Set(permissionKeys);
 
-    // Then insert the new set of permissions
-    if (permissionKeys.length > 0) {
-      const rows = permissionKeys.map(key => ({
-        role_id: roleId,
-        permission_key: key,
-      }));
+    const toAdd = permissionKeys.filter(k => !existingSet.has(k));
+    const toRemove = Array.from(existingSet).filter(k => !newSet.has(k));
 
+    if (toRemove.length > 0) {
+      const { error: deleteError } = await supabase
+        .from('role_permissions')
+        .delete()
+        .eq('role_id', roleId)
+        .in('permission_key', toRemove);
+      if (deleteError) throw deleteError;
+    }
+
+    if (toAdd.length > 0) {
+      const rows = toAdd.map(key => ({ role_id: roleId, permission_key: key }));
       const { error: insertError } = await supabase
         .from('role_permissions')
         .insert(rows);
-
       if (insertError) throw insertError;
     }
   },

@@ -38,11 +38,11 @@ export async function authenticateUser(
     req.user = {
       id: data.user.id,
       email: data.user.email ?? undefined,
-      role: data.user.role?.toString(),
+      role: data.user.role,
     };
 
     next();
   } catch (err) {
-    res.status(500).json({ error: 'Authentication verification failed' });
+    next(err);
   }
 }

@@ -81,41 +81,41 @@ DECLARE
     v_employee_id UUID;
     v_role_ids UUID[];
 BEGIN
-    -- Create default roles (idempotent)
+    -- Create default roles (idempotent — does not overwrite existing roles)
     INSERT INTO public.roles (organization_id, name, description, is_system)
     VALUES (p_org_id, 'Administrator', 'Full access to all features and settings', true)
-    ON CONFLICT (organization_id, name) DO UPDATE SET is_system = true
-    RETURNING id INTO v_admin_id;
+    ON CONFLICT (organization_id, name) DO NOTHING;
+    SELECT id INTO v_admin_id FROM public.roles WHERE organization_id = p_org_id AND name = 'Administrator';
 
     INSERT INTO public.roles (organization_id, name, description, is_system)
     VALUES (p_org_id, 'CEO', 'Chief Executive Officer - full access', true)
-    ON CONFLICT (organization_id, name) DO UPDATE SET is_system = true
-    RETURNING id INTO v_ceo_id;
+    ON CONFLICT (organization_id, name) DO NOTHING;
+    SELECT id INTO v_ceo_id FROM public.roles WHERE organization_id = p_org_id AND name = 'CEO';
 
     INSERT INTO public.roles (organization_id, name, description, is_system)
     VALUES (p_org_id, 'COO', 'Chief Operating Officer - operational control', true)
-    ON CONFLICT (organization_id, name) DO UPDATE SET is_system = true
-    RETURNING id INTO v_coo_id;
+    ON CONFLICT (organization_id, name) DO NOTHING;
+    SELECT id INTO v_coo_id FROM public.roles WHERE organization_id = p_org_id AND name = 'COO';
 
     INSERT INTO public.roles (organization_id, name, description, is_system)
     VALUES (p_org_id, 'HR', 'Human Resources - manages people', true)
-    ON CONFLICT (organization_id, name) DO UPDATE SET is_system = true
-    RETURNING id INTO v_hr_id;
+    ON CONFLICT (organization_id, name) DO NOTHING;
+    SELECT id INTO v_hr_id FROM public.roles WHERE organization_id = p_org_id AND name = 'HR';
 
     INSERT INTO public.roles (organization_id, name, description, is_system)
     VALUES (p_org_id, 'PM', 'Project Manager - manages projects and timelines', true)
-    ON CONFLICT (organization_id, name) DO UPDATE SET is_system = true
-    RETURNING id INTO v_pm_id;
+    ON CONFLICT (organization_id, name) DO NOTHING;
+    SELECT id INTO v_pm_id FROM public.roles WHERE organization_id = p_org_id AND name = 'PM';
 
     INSERT INTO public.roles (organization_id, name, description, is_system)
     VALUES (p_org_id, 'HOD', 'Head of Department - oversees department work', true)
-    ON CONFLICT (organization_id, name) DO UPDATE SET is_system = true
-    RETURNING id INTO v_hod_id;
+    ON CONFLICT (organization_id, name) DO NOTHING;
+    SELECT id INTO v_hod_id FROM public.roles WHERE organization_id = p_org_id AND name = 'HOD';
 
     INSERT INTO public.roles (organization_id, name, description, is_system)
     VALUES (p_org_id, 'Employee', 'Standard team member', true)
-    ON CONFLICT (organization_id, name) DO UPDATE SET is_system = true
-    RETURNING id INTO v_employee_id;
+    ON CONFLICT (organization_id, name) DO NOTHING;
+    SELECT id INTO v_employee_id FROM public.roles WHERE organization_id = p_org_id AND name = 'Employee';
 
     v_role_ids := ARRAY[v_admin_id, v_ceo_id, v_coo_id, v_hr_id, v_pm_id, v_hod_id, v_employee_id];
 
@@ -353,6 +353,7 @@ AS $$
   JOIN roles r ON r.id = p.role_id
   JOIN role_permissions rp ON rp.role_id = r.id
   WHERE p.id = p_user_id
+  AND p.organization_id = public.get_user_organization_id()
 $$;
 
 -- =============================================
@@ -371,6 +372,7 @@ AS $$
     JOIN roles r ON r.id = p.role_id
     JOIN role_permissions rp ON rp.role_id = r.id
     WHERE p.id = p_user_id
+    AND p.organization_id = public.get_user_organization_id()
     AND rp.permission_key = p_permission
   )
 $$;

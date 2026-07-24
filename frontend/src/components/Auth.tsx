@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../api/supabaseClient';
+import { tokens, radius, fontSize } from '../theme/tokens';
 
 const Auth = () => {
   const params = new URLSearchParams(window.location.search);
@@ -13,25 +15,34 @@ const Auth = () => {
 
   const [error, setError] = useState('');
   const [inviteInfo, setInviteInfo] = useState<{ org_name: string } | null>(null);
+  const [inviteError, setInviteError] = useState(false);
+  const [signingUp, setSigningUp] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
 
-  // If there's an invite token, fetch invite info on mount
   React.useEffect(() => {
     if (inviteToken) {
-      supabase
-        .rpc('get_invite_by_token', { p_token: inviteToken })
-        .then(({ data, error }) => {
+      (async () => {
+        try {
+          const { data, error } = await supabase
+            .rpc('get_invite_by_token', { p_token: inviteToken });
           if (!error && data && data.length > 0) {
             const row = data[0] as { organization_name: string; email: string };
             setInviteInfo({ org_name: row.organization_name });
-            // Pre-fill the email so the invited user knows which account was invited
             setSignupEmail(row.email);
+          } else {
+            setInviteError(true);
           }
-        });
+        } catch {
+          setInviteError(true);
+        }
+      })();
     }
   }, [inviteToken]);
 
   const handleSignup = async (event: React.FormEvent) => {
     event.preventDefault();
+    setSigningUp(true);
+    setError('');
 
     const options: any = {};
 
@@ -49,91 +60,157 @@ const Auth = () => {
 
     if (error) setError(error.message);
     else alert('Sign up successful! Please check your email to confirm.');
+    setSigningUp(false);
   };
 
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
+    setLoggingIn(true);
+    setError('');
     const { error } = await supabase.auth.signInWithPassword({
       email: loginEmail,
       password: loginPassword,
     });
 
     if (error) setError(error.message);
+    setLoggingIn(false);
   };
 
+  const inputStyle = {
+    background: tokens.surfaceInset,
+    border: `1px solid ${tokens.borderDefault}`,
+    color: tokens.textPrimary,
+    borderRadius: radius.sm,
+    padding: '8px 12px',
+    fontSize: fontSize.base,
+    outline: 'none',
+    width: '100%',
+    boxSizing: 'border-box' as const,
+    transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
+    marginTop: 4,
+  };
+
+  const labelStyle = {
+    color: tokens.textSecondary,
+    fontSize: fontSize.sm,
+    fontWeight: 500,
+    marginBottom: 4,
+    display: 'block',
+  };
+
+  const btnStyle = {
+    background: tokens.accentPrimary,
+    color: '#fff',
+    border: `1px solid ${tokens.accentPrimary}`,
+    borderRadius: radius.sm,
+    padding: '10px 16px',
+    fontSize: fontSize.base,
+    fontWeight: 600,
+    cursor: 'pointer',
+    width: '100%',
+    marginTop: 8,
+    transition: 'all 0.15s ease',
+  };
+
+  const inputReadOnlyStyle = inviteInfo ? { ...inputStyle, background: '#161922', cursor: 'not-allowed' } : inputStyle;
+
   return (
-    <div style={{ padding: '20px', maxWidth: '400px' }}>
-      <h2>Agency Management App</h2>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+    <div>
+      {error && (
+        <div style={{
+          padding: '8px 12px',
+          marginBottom: 16,
+          borderRadius: radius.sm,
+          background: 'rgba(239, 68, 68, 0.1)',
+          color: tokens.danger,
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          fontSize: fontSize.base,
+        }}>
+          {error}
+        </div>
+      )}
 
       {inviteToken && inviteInfo && (
-        <p style={{ color: '#4a90d9', fontWeight: 'bold' }}>
+        <div style={{
+          padding: '10px 14px',
+          marginBottom: 16,
+          borderRadius: radius.sm,
+          background: tokens.accentMuted,
+          color: tokens.accentPrimary,
+          border: `1px solid rgba(58, 149, 154, 0.3)`,
+          fontSize: fontSize.base,
+          fontWeight: 600,
+          borderLeft: `2px solid ${tokens.accentPrimary}`,
+        }}>
           You've been invited to join <strong>{inviteInfo.org_name}</strong>
-        </p>
+        </div>
       )}
 
-      {inviteToken && !inviteInfo && (
-        <p style={{ color: '#888' }}>Verifying invitation...</p>
+      {inviteToken && !inviteInfo && !inviteError && (
+        <p style={{ color: tokens.textDim, fontSize: fontSize.base }}>Verifying invitation...</p>
       )}
 
-      {/* ======== Signup Form ======== */}
+      {inviteToken && inviteError && (
+        <div style={{
+          padding: '8px 12px',
+          marginBottom: 16,
+          borderRadius: radius.sm,
+          background: 'rgba(239, 68, 68, 0.1)',
+          color: tokens.danger,
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          fontSize: fontSize.base,
+        }}>
+          Invalid or expired invitation link.
+        </div>
+      )}
+
       <form onSubmit={handleSignup}>
-        <h3>Sign Up</h3>
+        <h3 style={{ color: tokens.textPrimary, fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>Sign Up</h3>
 
         {!inviteToken && (
-          <>
-            <label>
-              Organization Name:{' '}
-              <input type="text" value={signupOrgName} onChange={(e) => setSignupOrgName(e.target.value)} required />
-            </label>
-            <br />
-          </>
+          <div style={{ marginBottom: 12 }}>
+            <label style={labelStyle}>Organization Name</label>
+            <input type="text" value={signupOrgName} onChange={(e) => setSignupOrgName(e.target.value)} required style={inputStyle} />
+          </div>
         )}
 
-        <label>
-          Email:{' '}
-          <input
-            type="email"
-            value={signupEmail}
-            onChange={(e) => setSignupEmail(e.target.value)}
-            readOnly={!!inviteInfo}
-            style={inviteInfo ? { background: '#f0f0f0', cursor: 'not-allowed' } : {}}
-          />
-        </label>
-        <br />
-        <label>
-          Password:{' '}
-          <input type="password" value={signupPassword} onChange={(e) => setSignupPassword(e.target.value)} />
-        </label>
-        <br />
-        <button type="submit">Sign Up</button>
+        <div style={{ marginBottom: 12 }}>
+          <label style={labelStyle}>Email</label>
+          <input type="email" value={signupEmail} onChange={(e) => setSignupEmail(e.target.value)} readOnly={!!inviteInfo} style={inputReadOnlyStyle} />
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={labelStyle}>Password</label>
+          <input type="password" value={signupPassword} onChange={(e) => setSignupPassword(e.target.value)} style={inputStyle} />
+        </div>
+        <button type="submit" disabled={signingUp} style={btnStyle}>
+          {signingUp ? 'Signing up...' : 'Sign Up'}
+        </button>
       </form>
 
-      {/* ======== Login Form (hidden when following an invite link) ======== */}
       {!inviteToken && (
         <>
-          <hr />
+          <div style={{ borderTop: `1px solid ${tokens.borderDefault}`, margin: '24px 0' }} />
           <form onSubmit={handleLogin}>
-            <h3>Login</h3>
-            <label>
-              Email:{' '}
-              <input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} />
-            </label>
-            <br />
-            <label>
-              Password:{' '}
-              <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} />
-            </label>
-            <br />
-            <button type="submit">Login</button>
+            <h3 style={{ color: tokens.textPrimary, fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>Login</h3>
+            <div style={{ marginBottom: 12 }}>
+              <label style={labelStyle}>Email</label>
+              <input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} style={inputStyle} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={labelStyle}>Password</label>
+              <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} style={inputStyle} />
+            </div>
+            <button type="submit" disabled={loggingIn} style={btnStyle}>
+              {loggingIn ? 'Logging in...' : 'Login'}
+            </button>
           </form>
         </>
       )}
 
-      {/* When following an invite link, show a small link to login for existing users */}
       {inviteToken && (
-        <p style={{ fontSize: '0.85em', color: '#888', marginTop: '20px' }}>
-          Already have an account? <a href="/" style={{ color: '#4a90d9' }}>Log in here</a>
+        <p style={{ color: tokens.textDim, fontSize: fontSize.sm, marginTop: 20, textAlign: 'center' }}>
+          Already have an account?{' '}
+          <Link to="/" style={{ color: tokens.accentPrimary, textDecoration: 'none', fontWeight: 600 }}>Log in here</Link>
         </p>
       )}
     </div>

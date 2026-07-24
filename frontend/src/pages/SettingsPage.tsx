@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import RoleManagement from '../components/RoleManagement';
+import { tokens, fontSize } from '../theme/tokens';
 
 type SettingsTab = 'roles';
 
@@ -7,28 +8,29 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('roles');
 
   return (
-    <div style={{ padding: '20px' }}>
-      <h2>Settings</h2>
+    <div>
+      <h2 style={{ color: tokens.textPrimary, fontSize: fontSize.lg, fontWeight: 600, margin: '0 0 20px' }}>Settings</h2>
 
       {/* Tab Navigation */}
       <div style={{
         display: 'flex',
-        gap: '4px',
-        borderBottom: '1px solid #ddd',
-        marginBottom: '20px',
-        paddingBottom: '0',
+        gap: 0,
+        borderBottom: `1px solid ${tokens.borderDefault}`,
+        marginBottom: 24,
       }}>
         <button
           onClick={() => setActiveTab('roles')}
           style={{
             padding: '10px 20px',
-            background: activeTab === 'roles' ? '#4a90d9' : 'transparent',
-            color: activeTab === 'roles' ? 'white' : '#555',
+            background: 'transparent',
+            color: activeTab === 'roles' ? tokens.accentPrimary : tokens.textSecondary,
             border: 'none',
-            borderRadius: '4px 4px 0 0',
+            borderBottom: activeTab === 'roles' ? `2px solid ${tokens.accentPrimary}` : '2px solid transparent',
             cursor: 'pointer',
-            fontWeight: activeTab === 'roles' ? 'bold' : 'normal',
-            fontSize: '0.95em',
+            fontWeight: activeTab === 'roles' ? 600 : 400,
+            fontSize: fontSize.md,
+            marginBottom: -1,
+            transition: 'all 0.15s ease',
           }}
         >
           Roles & Permissions
