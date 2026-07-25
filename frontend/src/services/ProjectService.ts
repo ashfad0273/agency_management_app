@@ -8,6 +8,7 @@ export interface Project {
   organization_id: string;
   status: string;
   deadline: string | null;
+  created_at?: string;
 }
 
 export interface ProjectCardData extends Project {
@@ -103,13 +104,25 @@ export const ProjectService = {
   },
 
   async getProjects() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+
     const { data, error } = await supabase
-      .from('projects')
-      .select('*')
-      .order('created_at', { ascending: false });
+      .from('project_members')
+      .select('project_id, projects!inner(id, name, description, organization_id, status, deadline, created_at)')
+      .eq('user_id', user.id);
 
     if (error) throw error;
-    return data as Project[];
+
+    interface ProjectJoin {
+      project_id: string;
+      projects: Project | Project[];
+    }
+
+    return (data as unknown as ProjectJoin[]).map(item => {
+      const p = Array.isArray(item.projects) ? item.projects[0] : item.projects;
+      return p as Project;
+    }).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
   },
 
   async getProjectsWithDetails(): Promise<ProjectCardData[]> {

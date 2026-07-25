@@ -59,6 +59,16 @@ FOR SELECT USING (
 CREATE POLICY "project_members_insert" ON project_members
 FOR INSERT WITH CHECK (true);
 
+CREATE POLICY "project_members_update" ON project_members
+FOR UPDATE USING (
+  organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid() LIMIT 1)
+);
+
+CREATE POLICY "project_members_delete" ON project_members
+FOR DELETE USING (
+  organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid() LIMIT 1)
+);
+
 
 -- 3. Fix channel_members policies — OLD policies self-referenced channel_members causing recursion
 DROP POLICY IF EXISTS "cm_select" ON channel_members;

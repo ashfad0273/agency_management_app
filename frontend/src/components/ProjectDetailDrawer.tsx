@@ -3,6 +3,7 @@ import { ProjectService, Project } from '../services/ProjectService';
 import { ProjectMemberService } from '../services/ProjectMemberService';
 import { TaskService, Task } from '../services/TaskService';
 import { MilestoneService, Milestone } from '../services/MilestoneService';
+import RichTextEditor from './RichTextEditor';
 import { tokens, radius, fontSize } from '../theme/tokens';
 
 type Tab = 'overview' | 'tasks' | 'milestones';
@@ -20,6 +21,67 @@ const STATUS_OPTIONS = [
   { value: 'on_hold', label: 'On Hold' },
   { value: 'completed', label: 'Completed' },
 ];
+
+function daysUntil(dateStr: string): { days: number; overdue: boolean } {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const target = new Date(dateStr);
+  target.setHours(0, 0, 0, 0);
+  const diff = Math.round((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  return { days: Math.abs(diff), overdue: diff < 0 };
+}
+
+function deadlineDisplay(deadline: string | null): { label: string; color: string } | null {
+  if (!deadline) return null;
+  const { days, overdue } = daysUntil(deadline);
+  if (overdue) return { label: `Overdue by ${days} day${days !== 1 ? 's' : ''}`, color: tokens.danger };
+  if (days === 0) return { label: 'Due today', color: tokens.warning };
+  if (days === 1) return { label: 'Due tomorrow', color: tokens.warning };
+  if (days <= 3) return { label: `${days} days left`, color: tokens.warning };
+  if (days <= 14) return { label: `${days} days left`, color: tokens.accentPrimary };
+  return { label: `${days} days left`, color: tokens.success };
+}
+
+const sectionTitle: CSSProperties = {
+  color: tokens.textSecondary,
+  fontSize: fontSize.sm,
+  fontWeight: 600,
+  textTransform: 'uppercase',
+  letterSpacing: '0.5px',
+};
+
+const inputStyle: CSSProperties = {
+  background: tokens.surfaceInset,
+  border: `1px solid ${tokens.borderDefault}`,
+  color: tokens.textPrimary,
+  borderRadius: radius.sm,
+  padding: '8px 12px',
+  fontSize: fontSize.base,
+  outline: 'none',
+  width: '100%',
+  boxSizing: 'border-box',
+};
+
+function statusPillStyle(status: string | undefined) {
+  const s = status || 'active';
+  const colors: Record<string, { bg: string; text: string }> = {
+    active: { bg: 'rgba(58, 149, 154, 0.15)', text: tokens.accentPrimary },
+    on_hold: { bg: 'rgba(234, 179, 8, 0.15)', text: tokens.warning },
+    completed: { bg: 'rgba(34, 197, 94, 0.15)', text: tokens.success },
+  };
+  const c = colors[s] || { bg: 'rgba(100, 116, 139, 0.15)', text: tokens.textSecondary };
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '3px 10px',
+    borderRadius: radius.sm,
+    fontSize: fontSize.xs,
+    fontWeight: 600,
+    lineHeight: 1.4,
+    background: c.bg,
+    color: c.text,
+  } as CSSProperties;
+}
 
 export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, onDelete }: Props) {
   const [tab, setTab] = useState<Tab>('overview');
@@ -40,6 +102,7 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
   const [editDeadline, setEditDeadline] = useState('');
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     if (!open || !project) return;
@@ -49,6 +112,7 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
     setStatusMenuOpen(false);
     setEditing(false);
     setFeedback(null);
+    setConfirmDelete(false);
     loadData();
   }, [project?.id, open]);
 
@@ -86,6 +150,19 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
       onUpdate();
     } catch (err) {
       console.error('Error toggling member:', err);
+      setFeedback({ type: 'error', message: 'Failed to update team members' });
+    }
+  };
+
+  const handleRemoveMember = async (userId: string) => {
+    if (!project) return;
+    try {
+      await ProjectMemberService.removeMember(project.id, userId);
+      await loadData();
+      onUpdate();
+    } catch (err) {
+      console.error('Error removing member:', err);
+      setFeedback({ type: 'error', message: 'Failed to remove member' });
     }
   };
 
@@ -121,7 +198,7 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
     try {
       await ProjectService.updateProject(project.id, {
         name: editName.trim(),
-        description: editDescription.trim() || null,
+        description: editDescription || null,
         deadline: editDeadline || null,
       });
       setEditing(false);
@@ -132,6 +209,17 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
       setFeedback({ type: 'error', message: 'Failed to update project' });
     }
     setSaving(false);
+  };
+
+  const handleDeleteProject = () => {
+    if (!project) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    setShowActions(false);
+    setConfirmDelete(false);
+    onDelete(project.id);
   };
 
   const handleAddTask = async (e: FormEvent) => {
@@ -228,45 +316,26 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
 
   const completedTasks = tasks.filter(t => t.status === 'completed').length;
   const progress = tasks.length > 0 ? Math.round((completedTasks / tasks.length) * 100) : 0;
+  const dlInfo = deadlineDisplay(project.deadline);
 
   return (
     <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.4)',
-          zIndex: 900,
-          animation: 'fade-in 0.15s ease',
-        }}
-      />
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 900,
+        animation: 'fade-in 0.15s ease',
+      }} />
 
-      {/* Drawer */}
       <div style={{
-        position: 'fixed',
-        top: 0,
-        right: 0,
-        width: 520,
-        maxWidth: '100vw',
-        height: '100vh',
-        background: tokens.surfaceInset,
-        borderLeft: `1px solid ${tokens.borderDefault}`,
-        zIndex: 950,
-        display: 'flex',
-        flexDirection: 'column',
+        position: 'fixed', top: 0, right: 0, width: 520, maxWidth: '100vw', height: '100vh',
+        background: tokens.surfaceInset, borderLeft: `1px solid ${tokens.borderDefault}`,
+        zIndex: 950, display: 'flex', flexDirection: 'column',
         animation: 'slide-in-right 0.25s ease-out',
         boxShadow: '-8px 0 24px rgba(0,0,0,0.3)',
       }}>
         {/* Header */}
         <div style={{
-          padding: '18px 20px',
-          borderBottom: `1px solid ${tokens.borderDefault}`,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: 12,
+          padding: '18px 20px', borderBottom: `1px solid ${tokens.borderDefault}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12,
         }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -281,30 +350,18 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
                   {project.name}
                 </h2>
               )}
-              {/* Status dropdown instead of just a badge */}
               <div style={{ position: 'relative' }}>
                 <button
                   onClick={(e) => { e.stopPropagation(); setStatusMenuOpen(!statusMenuOpen); }}
-                  style={{
-                    ...statusPillStyle(project.status),
-                    cursor: 'pointer',
-                    border: `1px solid ${tokens.borderDefault}`,
-                  }}
+                  style={{ ...statusPillStyle(project.status), cursor: 'pointer', border: `1px solid ${tokens.borderDefault}` }}
                 >
                   {STATUS_OPTIONS.find(s => s.value === project.status)?.label || 'Active'}
                 </button>
                 {statusMenuOpen && (
                   <div style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    marginTop: 4,
-                    background: tokens.surfaceFloat,
-                    border: `1px solid ${tokens.borderDefault}`,
-                    borderRadius: radius.sm,
-                    zIndex: 1000,
-                    minWidth: 120,
-                    overflow: 'hidden',
+                    position: 'absolute', top: '100%', left: 0, marginTop: 4,
+                    background: tokens.surfaceFloat, border: `1px solid ${tokens.borderDefault}`,
+                    borderRadius: radius.sm, zIndex: 1000, minWidth: 120, overflow: 'hidden',
                     boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
                   }}>
                     {STATUS_OPTIONS.map(opt => (
@@ -312,12 +369,10 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
                         key={opt.value}
                         onClick={() => handleStatusChange(opt.value)}
                         style={{
-                          padding: '7px 12px',
-                          cursor: 'pointer',
+                          padding: '7px 12px', cursor: 'pointer',
                           color: opt.value === project.status ? tokens.accentPrimary : tokens.textPrimary,
                           background: opt.value === project.status ? tokens.accentMuted : 'transparent',
-                          fontSize: fontSize.base,
-                          transition: 'background 0.1s',
+                          fontSize: fontSize.base, transition: 'background 0.1s',
                         }}
                       >
                         {opt.label}
@@ -329,84 +384,41 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
             </div>
           </div>
 
-          {/* Actions dropdown + Close */}
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             <div style={{ position: 'relative' }}>
               <button
                 onClick={() => setShowActions(!showActions)}
                 style={{
-                  background: 'transparent',
-                  border: `1px solid ${tokens.borderDefault}`,
-                  borderRadius: radius.sm,
-                  color: tokens.textSecondary,
-                  padding: '6px 10px',
-                  cursor: 'pointer',
-                  fontSize: fontSize.md,
+                  background: 'transparent', border: `1px solid ${tokens.borderDefault}`,
+                  borderRadius: radius.sm, color: tokens.textSecondary,
+                  padding: '6px 10px', cursor: 'pointer', fontSize: fontSize.md,
                 }}
               >
                 ⋯
               </button>
               {showActions && (
                 <div style={{
-                  position: 'absolute',
-                  top: '100%',
-                  right: 0,
-                  marginTop: 4,
-                  background: tokens.surfaceFloat,
-                  border: `1px solid ${tokens.borderDefault}`,
-                  borderRadius: radius.sm,
-                  zIndex: 1000,
-                  minWidth: 140,
-                  overflow: 'hidden',
+                  position: 'absolute', top: '100%', right: 0, marginTop: 4,
+                  background: tokens.surfaceFloat, border: `1px solid ${tokens.borderDefault}`,
+                  borderRadius: radius.sm, zIndex: 1000, minWidth: 150, overflow: 'hidden',
                   boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
                 }}>
+                  <div onClick={startEditing} style={{ padding: '7px 12px', cursor: 'pointer', color: tokens.textPrimary, fontSize: fontSize.base }}>Edit details</div>
                   <div
-                    onClick={startEditing}
-                    style={{
-                      padding: '7px 12px',
-                      cursor: 'pointer',
-                      color: tokens.textPrimary,
-                      fontSize: fontSize.base,
-                    }}
-                  >Edit details</div>
-                  <div
-                    onClick={() => { setShowActions(false); onDelete(project.id); }}
-                    style={{
-                      padding: '7px 12px',
-                      cursor: 'pointer',
-                      color: tokens.danger,
-                      fontSize: fontSize.base,
-                    }}
+                    onClick={handleDeleteProject}
+                    style={{ padding: '7px 12px', cursor: 'pointer', color: confirmDelete ? '#fff' : tokens.danger, background: confirmDelete ? tokens.danger : 'transparent', fontSize: fontSize.base }}
                   >
-                    Delete project
+                    {confirmDelete ? 'Click again to confirm' : 'Delete project'}
                   </div>
                 </div>
               )}
             </div>
-            <button
-              onClick={onClose}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: tokens.textDim,
-                fontSize: 20,
-                cursor: 'pointer',
-                padding: '4px 8px',
-                lineHeight: 1,
-              }}
-            >
-              ✕
-            </button>
+            <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: tokens.textDim, fontSize: 20, cursor: 'pointer', padding: '4px 8px', lineHeight: 1 }}>✕</button>
           </div>
         </div>
 
         {/* Tabs */}
-        <div style={{
-          padding: '10px 20px',
-          borderBottom: `1px solid ${tokens.borderDefault}`,
-          display: 'flex',
-          gap: 4,
-        }}>
+        <div style={{ padding: '10px 20px', borderBottom: `1px solid ${tokens.borderDefault}`, display: 'flex', gap: 4 }}>
           {tabLabel('overview', 'Overview')}
           {tabLabel('tasks', 'Tasks', tasks.length)}
           {tabLabel('milestones', 'Milestones', milestones.length)}
@@ -414,13 +426,9 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
 
         {/* Content */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px' }}>
-          {/* Feedback */}
           {feedback && (
             <div style={{
-              padding: '8px 14px',
-              marginBottom: 14,
-              borderRadius: radius.sm,
-              fontSize: fontSize.base,
+              padding: '8px 14px', marginBottom: 14, borderRadius: radius.sm, fontSize: fontSize.base,
               background: feedback.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
               color: feedback.type === 'success' ? tokens.success : tokens.danger,
               border: `1px solid ${feedback.type === 'success' ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
@@ -431,57 +439,34 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
 
           {tab === 'overview' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-              {/* Edit actions */}
               {editing && (
                 <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
-                  <button
-                    onClick={handleSaveEdit}
-                    disabled={saving || !editName.trim()}
-                    style={{
-                      background: tokens.accentPrimary,
-                      color: '#fff',
-                      border: `1px solid ${tokens.accentPrimary}`,
-                      borderRadius: radius.sm,
-                      padding: '8px 18px',
-                      fontSize: fontSize.base,
-                      fontWeight: 600,
-                      cursor: saving || !editName.trim() ? 'not-allowed' : 'pointer',
-                      opacity: saving || !editName.trim() ? 0.6 : 1,
-                    }}
-                  >
-                    {saving ? 'Saving...' : 'Save'}
-                  </button>
-                  <button
-                    onClick={cancelEditing}
-                    style={{
-                      background: 'transparent',
-                      color: tokens.textSecondary,
-                      border: `1px solid ${tokens.borderDefault}`,
-                      borderRadius: radius.sm,
-                      padding: '8px 18px',
-                      fontSize: fontSize.base,
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Cancel
-                  </button>
+                  <button onClick={handleSaveEdit} disabled={saving || !editName.trim()} style={{
+                    background: tokens.accentPrimary, color: '#fff', border: `1px solid ${tokens.accentPrimary}`,
+                    borderRadius: radius.sm, padding: '8px 18px', fontSize: fontSize.base, fontWeight: 600,
+                    cursor: saving || !editName.trim() ? 'not-allowed' : 'pointer',
+                    opacity: saving || !editName.trim() ? 0.6 : 1,
+                  }}>{saving ? 'Saving...' : 'Save'}</button>
+                  <button onClick={cancelEditing} style={{
+                    background: 'transparent', color: tokens.textSecondary, border: `1px solid ${tokens.borderDefault}`,
+                    borderRadius: radius.sm, padding: '8px 18px', fontSize: fontSize.base, fontWeight: 500, cursor: 'pointer',
+                  }}>Cancel</button>
                 </div>
               )}
+
               {/* Description */}
               <div>
                 <h4 style={{ ...sectionTitle, marginBottom: 6 }}>Description</h4>
                 {editing ? (
-                  <textarea
-                    value={editDescription}
-                    onChange={(e) => setEditDescription(e.target.value)}
-                    rows={3}
-                    style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
-                  />
+                  <RichTextEditor value={editDescription} onChange={setEditDescription} placeholder="Describe your project..." />
                 ) : (
-                  <p style={{ margin: 0, color: tokens.textSecondary, fontSize: fontSize.base, lineHeight: 1.6 }}>
-                    {project.description || 'No description provided.'}
-                  </p>
+                  <div style={{ color: tokens.textSecondary, fontSize: fontSize.base, lineHeight: 1.6, wordBreak: 'break-word' }}>
+                    {project.description && project.description.includes('<') ? (
+                      <div dangerouslySetInnerHTML={{ __html: project.description }} />
+                    ) : (
+                      <span>{project.description || 'No description provided.'}</span>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -489,16 +474,23 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
               <div>
                 <h4 style={{ ...sectionTitle, marginBottom: 6 }}>Deadline</h4>
                 {editing ? (
-                  <input
-                    type="date"
-                    value={editDeadline}
-                    onChange={(e) => setEditDeadline(e.target.value)}
-                    style={{ ...inputStyle, width: 'auto' }}
-                  />
+                  <input type="date" value={editDeadline} onChange={(e) => setEditDeadline(e.target.value)} style={{ ...inputStyle, width: 'auto' }} />
                 ) : (
-                  <span style={{ color: tokens.textPrimary, fontSize: fontSize.base }}>
-                    {project.deadline ? new Date(project.deadline).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : 'No deadline set'}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ color: tokens.textPrimary, fontSize: fontSize.base }}>
+                      {project.deadline
+                        ? new Date(project.deadline).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+                        : 'No deadline set'}
+                    </span>
+                    {dlInfo && (
+                      <span style={{
+                        background: dlInfo.color === tokens.danger ? 'rgba(239, 68, 68, 0.1)' : dlInfo.color === tokens.warning ? 'rgba(234, 179, 8, 0.1)' : 'rgba(58, 149, 154, 0.1)',
+                        color: dlInfo.color, padding: '2px 8px', borderRadius: radius.sm, fontSize: fontSize.xs, fontWeight: 600,
+                      }}>
+                        {dlInfo.label}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -524,31 +516,18 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
                     <button
                       onClick={() => setShowMemberDropdown(!showMemberDropdown)}
                       style={{
-                        background: 'transparent',
-                        color: tokens.accentPrimary,
-                        border: `1px solid ${tokens.accentPrimary}`,
-                        borderRadius: radius.sm,
-                        padding: '4px 10px',
-                        fontSize: fontSize.sm,
-                        fontWeight: 500,
-                        cursor: 'pointer',
+                        background: 'transparent', color: tokens.accentPrimary,
+                        border: `1px solid ${tokens.accentPrimary}`, borderRadius: radius.sm,
+                        padding: '4px 10px', fontSize: fontSize.sm, fontWeight: 500, cursor: 'pointer',
                       }}
                     >
                       + Add / Remove
                     </button>
                     {showMemberDropdown && (
                       <div style={{
-                        position: 'absolute',
-                        top: '100%',
-                        right: 0,
-                        marginTop: 4,
-                        background: tokens.surfaceFloat,
-                        border: `1px solid ${tokens.borderDefault}`,
-                        borderRadius: radius.sm,
-                        zIndex: 1000,
-                        minWidth: 220,
-                        maxHeight: 260,
-                        overflow: 'auto',
+                        position: 'absolute', top: '100%', right: 0, marginTop: 4,
+                        background: tokens.surfaceFloat, border: `1px solid ${tokens.borderDefault}`,
+                        borderRadius: radius.sm, zIndex: 1000, minWidth: 220, maxHeight: 260, overflow: 'auto',
                         boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
                       }}>
                         {orgMembers.length === 0 && (
@@ -561,29 +540,17 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
                               key={m.id}
                               onClick={() => toggleMember(m.id)}
                               style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 8,
-                                padding: '7px 12px',
-                                cursor: 'pointer',
-                                color: tokens.textPrimary,
-                                fontSize: fontSize.base,
+                                display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px',
+                                cursor: 'pointer', color: tokens.textPrimary, fontSize: fontSize.base,
                                 background: member ? tokens.accentMuted : 'transparent',
                               }}
                             >
                               <div style={{
-                                width: 18,
-                                height: 18,
-                                borderRadius: 4,
+                                width: 18, height: 18, borderRadius: 4,
                                 border: `1px solid ${member ? tokens.accentPrimary : tokens.borderDefault}`,
                                 background: member ? tokens.accentPrimary : 'transparent',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                color: '#fff',
-                                fontSize: 10,
-                                fontWeight: 700,
-                                flexShrink: 0,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                color: '#fff', fontSize: 10, fontWeight: 700, flexShrink: 0,
                               }}>
                                 {member ? '✓' : ''}
                               </div>
@@ -595,31 +562,19 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
                     )}
                   </div>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {members.length === 0 && (
                     <span style={{ color: tokens.textDim, fontSize: fontSize.sm }}>No members assigned</span>
                   )}
                   {members.map(m => (
                     <div key={m.id} style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      padding: '7px 10px',
-                      background: tokens.surfaceHover,
-                      borderRadius: radius.sm,
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '7px 10px', background: tokens.surfaceHover, borderRadius: radius.sm,
                     }}>
                       <div style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: '50%',
-                        background: tokens.surfaceFloat,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: tokens.textPrimary,
-                        fontSize: fontSize.xs,
-                        fontWeight: 600,
-                        flexShrink: 0,
+                        width: 28, height: 28, borderRadius: '50%', background: tokens.surfaceFloat,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: tokens.textPrimary, fontSize: fontSize.xs, fontWeight: 600, flexShrink: 0,
                       }}>
                         {(m.email || '?').charAt(0).toUpperCase()}
                       </div>
@@ -629,99 +584,65 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
                         </div>
                         <div style={{ color: tokens.textDim, fontSize: fontSize.xs }}>{m.role}</div>
                       </div>
+                      <button
+                        onClick={() => handleRemoveMember(m.user_id)}
+                        title="Remove from project"
+                        style={{
+                          background: 'transparent', border: 'none', color: tokens.danger,
+                          cursor: 'pointer', fontSize: 14, padding: '4px 6px', borderRadius: radius.sm,
+                          opacity: 0.6, lineHeight: 1,
+                        }}
+                      >
+                        ✕
+                      </button>
                     </div>
                   ))}
                 </div>
               </div>
+
+              {/* Created at */}
+              {project.created_at && (
+                <div>
+                  <h4 style={{ ...sectionTitle, marginBottom: 4 }}>Created</h4>
+                  <span style={{ color: tokens.textDim, fontSize: fontSize.sm }}>
+                    {new Date(project.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
           {tab === 'tasks' && (
             <div>
-              {/* Add task form */}
               <form onSubmit={handleAddTask} style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-                <input
-                  placeholder="New task title..."
-                  value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
-                  style={inputStyle}
-                />
+                <input placeholder="New task title..." value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} style={inputStyle} />
                 <button type="submit" style={{
-                  background: tokens.accentPrimary,
-                  color: '#fff',
-                  border: `1px solid ${tokens.accentPrimary}`,
-                  borderRadius: radius.sm,
-                  padding: '8px 14px',
-                  fontSize: fontSize.base,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}>
-                  Add
-                </button>
+                  background: tokens.accentPrimary, color: '#fff', border: `1px solid ${tokens.accentPrimary}`,
+                  borderRadius: radius.sm, padding: '8px 14px', fontSize: fontSize.base, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+                }}>Add</button>
               </form>
 
-              {/* Task list */}
               {loading ? (
                 <div style={{ color: tokens.textDim, fontSize: fontSize.sm }}>Loading tasks...</div>
               ) : tasks.length === 0 ? (
-                <div style={{ color: tokens.textDim, fontSize: fontSize.sm, textAlign: 'center', padding: 20 }}>
-                  No tasks yet
-                </div>
+                <div style={{ color: tokens.textDim, fontSize: fontSize.sm, textAlign: 'center', padding: 20 }}>No tasks yet. Add one above.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {tasks.map(t => (
-                    <div key={t.id} style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '8px 10px',
-                      borderRadius: radius.sm,
-                      background: tokens.surfaceHover,
-                    }}>
-                      <div
-                        onClick={() => handleToggleTask(t.id, t.status)}
-                        style={{
-                          width: 18,
-                          height: 18,
-                          borderRadius: 4,
-                          border: `1px solid ${t.status === 'completed' ? tokens.success : tokens.borderDefault}`,
-                          background: t.status === 'completed' ? tokens.success : 'transparent',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: '#fff',
-                          fontSize: 11,
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          flexShrink: 0,
-                        }}
-                      >
+                    <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: radius.sm, background: tokens.surfaceHover }}>
+                      <div onClick={() => handleToggleTask(t.id, t.status)} style={{
+                        width: 18, height: 18, borderRadius: 4,
+                        border: `1px solid ${t.status === 'completed' ? tokens.success : tokens.borderDefault}`,
+                        background: t.status === 'completed' ? tokens.success : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
+                        fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+                      }}>
                         {t.status === 'completed' ? '✓' : ''}
                       </div>
-                      <span style={{
-                        flex: 1,
-                        color: tokens.textPrimary,
-                        fontSize: fontSize.base,
-                        textDecoration: t.status === 'completed' ? 'line-through' : 'none',
-                        opacity: t.status === 'completed' ? 0.6 : 1,
-                      }}>
+                      <span style={{ flex: 1, color: tokens.textPrimary, fontSize: fontSize.base, textDecoration: t.status === 'completed' ? 'line-through' : 'none', opacity: t.status === 'completed' ? 0.6 : 1 }}>
                         {t.title}
                       </span>
-                      <button
-                        onClick={() => handleDeleteTask(t.id)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: tokens.danger,
-                          cursor: 'pointer',
-                          fontSize: fontSize.sm,
-                          padding: '2px 6px',
-                          opacity: 0.6,
-                        }}
-                      >
-                        ✕
-                      </button>
+                      <button onClick={() => handleDeleteTask(t.id)} style={{ background: 'none', border: 'none', color: tokens.danger, cursor: 'pointer', fontSize: fontSize.sm, padding: '2px 6px', opacity: 0.6 }}>✕</button>
                     </div>
                   ))}
                 </div>
@@ -731,78 +652,35 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
 
           {tab === 'milestones' && (
             <div>
-              {/* Add milestone form */}
               <form onSubmit={handleAddMilestone} style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-                <input
-                  placeholder="Milestone name..."
-                  value={newMsName}
-                  onChange={(e) => setNewMsName(e.target.value)}
-                  style={{ ...inputStyle, flex: 1, minWidth: 160 }}
-                />
-                <input
-                  type="date"
-                  value={newMsDate}
-                  onChange={(e) => setNewMsDate(e.target.value)}
-                  style={{ ...inputStyle, width: 150 }}
-                />
+                <input placeholder="Milestone name..." value={newMsName} onChange={(e) => setNewMsName(e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 160 }} />
+                <input type="date" value={newMsDate} onChange={(e) => setNewMsDate(e.target.value)} style={{ ...inputStyle, width: 150 }} />
                 <button type="submit" style={{
-                  background: tokens.accentPrimary,
-                  color: '#fff',
-                  border: `1px solid ${tokens.accentPrimary}`,
-                  borderRadius: radius.sm,
-                  padding: '8px 14px',
-                  fontSize: fontSize.base,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}>
-                  Add
-                </button>
+                  background: tokens.accentPrimary, color: '#fff', border: `1px solid ${tokens.accentPrimary}`,
+                  borderRadius: radius.sm, padding: '8px 14px', fontSize: fontSize.base, fontWeight: 600, cursor: 'pointer',
+                }}>Add</button>
               </form>
 
-              {/* Milestone list */}
               {loading ? (
                 <div style={{ color: tokens.textDim, fontSize: fontSize.sm }}>Loading milestones...</div>
               ) : milestones.length === 0 ? (
-                <div style={{ color: tokens.textDim, fontSize: fontSize.sm, textAlign: 'center', padding: 20 }}>
-                  No milestones yet
-                </div>
+                <div style={{ color: tokens.textDim, fontSize: fontSize.sm, textAlign: 'center', padding: 20 }}>No milestones yet. Add one above.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {milestones.map(m => (
-                    <div key={m.id} style={{
-                      padding: '10px 12px',
-                      borderRadius: radius.sm,
-                      background: tokens.surfaceHover,
-                      borderLeft: `3px solid ${m.status === 'completed' ? tokens.success : m.status === 'in_progress' ? tokens.accentPrimary : tokens.textDim}`,
-                    }}>
+                    <div key={m.id} style={{ padding: '10px 12px', borderRadius: radius.sm, background: tokens.surfaceHover, borderLeft: `3px solid ${m.status === 'completed' ? tokens.success : m.status === 'in_progress' ? tokens.accentPrimary : tokens.textDim}` }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div
-                          onClick={() => handleToggleMilestone(m.id, m.status)}
-                          style={{
-                            width: 18,
-                            height: 18,
-                            borderRadius: 4,
-                            border: `1px solid ${m.status === 'completed' ? tokens.success : tokens.borderDefault}`,
-                            background: m.status === 'completed' ? tokens.success : 'transparent',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: '#fff',
-                            fontSize: 11,
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            flexShrink: 0,
-                          }}
-                        >
+                        <div onClick={() => handleToggleMilestone(m.id, m.status)} style={{
+                          width: 18, height: 18, borderRadius: 4,
+                          border: `1px solid ${m.status === 'completed' ? tokens.success : tokens.borderDefault}`,
+                          background: m.status === 'completed' ? tokens.success : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
+                          fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+                        }}>
                           {m.status === 'completed' ? '✓' : ''}
                         </div>
                         <div style={{ flex: 1 }}>
-                          <div style={{
-                            color: tokens.textPrimary,
-                            fontSize: fontSize.base,
-                            fontWeight: 500,
-                            textDecoration: m.status === 'completed' ? 'line-through' : 'none',
-                          }}>
+                          <div style={{ color: tokens.textPrimary, fontSize: fontSize.base, fontWeight: 500, textDecoration: m.status === 'completed' ? 'line-through' : 'none' }}>
                             {m.name}
                           </div>
                           {m.due_date && (
@@ -811,20 +689,7 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
                             </div>
                           )}
                         </div>
-                        <button
-                          onClick={() => handleDeleteMilestone(m.id)}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: tokens.danger,
-                            cursor: 'pointer',
-                            fontSize: fontSize.sm,
-                            padding: '2px 6px',
-                            opacity: 0.6,
-                          }}
-                        >
-                          ✕
-                        </button>
+                        <button onClick={() => handleDeleteMilestone(m.id)} style={{ background: 'none', border: 'none', color: tokens.danger, cursor: 'pointer', fontSize: fontSize.sm, padding: '2px 6px', opacity: 0.6 }}>✕</button>
                       </div>
                     </div>
                   ))}
@@ -837,44 +702,3 @@ export default function ProjectDetailDrawer({ project, open, onClose, onUpdate, 
     </>
   );
 }
-
-function statusPillStyle(status: string | undefined) {
-  const s = status || 'active';
-  const colors: Record<string, { bg: string; text: string }> = {
-    active: { bg: 'rgba(58, 149, 154, 0.15)', text: tokens.accentPrimary },
-    on_hold: { bg: 'rgba(234, 179, 8, 0.15)', text: tokens.warning },
-    completed: { bg: 'rgba(34, 197, 94, 0.15)', text: tokens.success },
-  };
-  const c = colors[s] || { bg: 'rgba(100, 116, 139, 0.15)', text: tokens.textSecondary };
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    padding: '3px 10px',
-    borderRadius: radius.sm,
-    fontSize: fontSize.xs,
-    fontWeight: 600,
-    lineHeight: 1.4,
-    background: c.bg,
-    color: c.text,
-  } as CSSProperties;
-}
-
-const sectionTitle: CSSProperties = {
-  color: tokens.textSecondary,
-  fontSize: fontSize.sm,
-  fontWeight: 600,
-  textTransform: 'uppercase',
-  letterSpacing: '0.5px',
-};
-
-const inputStyle: CSSProperties = {
-  background: tokens.surfaceInset,
-  border: `1px solid ${tokens.borderDefault}`,
-  color: tokens.textPrimary,
-  borderRadius: radius.sm,
-  padding: '8px 12px',
-  fontSize: fontSize.base,
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
