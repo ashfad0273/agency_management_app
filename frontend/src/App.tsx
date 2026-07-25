@@ -1,7 +1,10 @@
-import { useState, useEffect, CSSProperties } from 'react';
+import { useState, useEffect, useCallback, CSSProperties } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { supabase } from './api/supabaseClient';
+import { NotificationService } from './services/NotificationService';
+import { useRealtimeNotifications } from './hooks/useRealtimeNotifications';
+import { playNotificationSound } from './utils/notificationSound';
 import Auth from './components/Auth';
 import ErrorBoundary from './components/ErrorBoundary';
 import GlobalHeader from './components/GlobalHeader';
@@ -26,14 +29,15 @@ function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [notificationBadge, setNotificationBadge] = useState(0);
 
-  const pushToast = (message: string, type: 'success' | 'error' = 'success') => {
+  const pushToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4500);
-  };
+  }, []);
 
   const dismissToast = (id: number) => setToasts((prev) => prev.filter((t) => t.id !== id));
 
@@ -70,13 +74,41 @@ function App() {
       setSession(session);
       setAuthError(null);
 
-      // When user signs in via magic link, process pending invite from URL
       if (event === 'SIGNED_IN' && session) {
         processInviteToken(session);
       }
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // Load initial unread count when session is available
+  useEffect(() => {
+    if (!session) return;
+    NotificationService.getUnreadCount()
+      .then(setNotificationBadge)
+      .catch(() => {});
+  }, [session]);
+
+  // Subscribe to realtime notifications
+  useRealtimeNotifications(session?.user?.id, (notification) => {
+    setNotificationBadge(prev => prev + 1);
+    const typeIcon: Record<string, string> = { message: '💬', task: '✅', project: '📋', info: 'ℹ️' };
+    const icon = typeIcon[notification.type] ?? '🔔';
+    const msg = notification.body
+      ? `${icon} ${notification.title}: ${notification.body}`
+      : `${icon} ${notification.title}`;
+    pushToast(msg, 'success');
+    playNotificationSound();
+  });
+
+  const handleMarkAllRead = async () => {
+    try {
+      await NotificationService.markAllAsRead();
+      setNotificationBadge(0);
+    } catch {
+      // silently fail
+    }
+  };
 
   if (!session) {
     return (
@@ -117,7 +149,6 @@ function App() {
           )}
           <Auth onSuccess={(msg) => pushToast(msg, 'success')} />
         </div>
-        {/* Toast notifications (rendered above the auth card) */}
         <ToastStack toasts={toasts} onDismiss={dismissToast} />
       </div>
     );
@@ -129,6 +160,8 @@ function App() {
         <GlobalHeader
           userEmail={session.user.email}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          notificationBadge={notificationBadge}
+          onMarkAllRead={handleMarkAllRead}
         />
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           <Sidebar collapsed={!sidebarOpen} />

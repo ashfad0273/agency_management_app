@@ -6,13 +6,17 @@ import { tokens, navHeight, radius, fontSize } from '../theme/tokens';
 interface Props {
   userEmail?: string;
   onToggleSidebar?: () => void;
+  notificationBadge?: number;
+  onMarkAllRead?: () => void;
 }
 
-export default function GlobalHeader({ userEmail, onToggleSidebar }: Props) {
+export default function GlobalHeader({ userEmail, onToggleSidebar, notificationBadge = 0, onMarkAllRead }: Props) {
   const navigate = useNavigate();
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [healthOk, setHealthOk] = useState(true);
   const menuRef = useRef<HTMLDivElement>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const checkHealth = async () => {
@@ -32,6 +36,9 @@ export default function GlobalHeader({ userEmail, onToggleSidebar }: Props) {
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setShowUserMenu(false);
+      }
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setShowNotifMenu(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -106,7 +113,7 @@ export default function GlobalHeader({ userEmail, onToggleSidebar }: Props) {
         <span style={{ fontSize: 13 }}>⌘</span>K
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <div
           style={{
             display: 'flex',
@@ -126,6 +133,70 @@ export default function GlobalHeader({ userEmail, onToggleSidebar }: Props) {
             }}
           />
           <span>{healthOk ? 'API OK' : 'Degraded'}</span>
+        </div>
+
+        {/* Notification bell */}
+        <div ref={notifRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => { setShowNotifMenu(!showNotifMenu); if (notificationBadge > 0) onMarkAllRead?.(); }}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: tokens.textSecondary,
+              cursor: 'pointer',
+              padding: 4,
+              fontSize: 16,
+              display: 'flex',
+              alignItems: 'center',
+              position: 'relative',
+            }}
+          >
+            🔔
+            {notificationBadge > 0 && (
+              <span style={{
+                position: 'absolute',
+                top: -2,
+                right: -4,
+                background: tokens.danger,
+                color: '#fff',
+                borderRadius: '50%',
+                minWidth: 16,
+                height: 16,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 10,
+                fontWeight: 700,
+                lineHeight: 1,
+                padding: '0 3px',
+                boxShadow: `0 0 0 2px ${tokens.canvasBg}`,
+              }}>
+                {notificationBadge > 99 ? '99+' : notificationBadge}
+              </span>
+            )}
+          </button>
+          {showNotifMenu && (
+            <div
+              style={{
+                position: 'absolute',
+                right: 0,
+                top: '100%',
+                marginTop: 8,
+                background: tokens.surfaceFloat,
+                border: `1px solid ${tokens.borderDefault}`,
+                borderRadius: radius.lg,
+                padding: 12,
+                minWidth: 200,
+                animation: 'slide-down 0.2s ease-out',
+                zIndex: 200,
+                textAlign: 'center',
+              }}
+            >
+              <div style={{ color: tokens.textDim, fontSize: fontSize.sm }}>
+                {notificationBadge > 0 ? 'Marked all as read' : 'No new notifications'}
+              </div>
+            </div>
+          )}
         </div>
 
         <div ref={menuRef} style={{ position: 'relative' }}>

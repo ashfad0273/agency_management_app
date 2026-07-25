@@ -74,6 +74,11 @@ export interface Database {
         Insert: { key: string; name: string; description?: string; group_name: string };
         Update: { key?: string; name?: string; description?: string; group_name?: string };
       };
+      notifications: {
+        Row: { id: string; organization_id: string; user_id: string; type: string; title: string; body: string | null; data: Json; is_read: boolean; created_at: string };
+        Insert: { id?: string; organization_id: string; user_id: string; type?: string; title: string; body?: string | null; data?: Json; is_read?: boolean; created_at?: string };
+        Update: { id?: string; organization_id?: string; user_id?: string; type?: string; title?: string; body?: string | null; data?: Json; is_read?: boolean; created_at?: string };
+      };
       roles: {
         Row: { id: string; organization_id: string; name: string; description: string; is_system: boolean; created_at: string };
         Insert: { id?: string; organization_id: string; name: string; description?: string; is_system?: boolean; created_at?: string };
