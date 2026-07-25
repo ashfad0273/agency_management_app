@@ -51,18 +51,34 @@ export const InviteService = {
     if (error) throw error;
 
     const invitation = data as Invitation;
-    const link = `${window.location.origin}/?invite=${invitation.token}`;
+    const redirectTo = `${window.location.origin}/?invite=${invitation.token}`;
 
-    // NOTE: We do NOT auto-create the user here via signInWithOtp/shouldCreateUser
-    // because that would fire handle_new_user immediately,
-    // prematurely marking the invitation as 'accepted'.
-    // Instead, the admin shares the invite link.
-    // When the recipient visits the link and signs up via the Auth component,
-    // handle_new_user will process the invite_token from their signup metadata.
+    // Send a magic link email via Supabase Auth.
+    // For new users: shouldCreateUser creates the auth user, handle_new_user fires,
+    //   processes the invite_token from metadata, accepts the invitation.
+    // For existing users: magic link signs them in, processInviteToken in App.tsx
+    //   picks up the pending invitation by email and accepts it.
+    let emailSent = false;
+    try {
+      const { error: otpError } = await supabase.auth.signInWithOtp({
+        email: email.trim().toLowerCase(),
+        options: {
+          shouldCreateUser: true,
+          emailRedirectTo: redirectTo,
+          data: {
+            invite_token: invitation.token,
+          },
+        },
+      });
+      if (otpError) throw otpError;
+      emailSent = true;
+    } catch (err) {
+      console.error('Failed to send invitation email:', err);
+      // Email send failed, but the invitation record was created.
+      // Admin can still share the invite link manually.
+    }
 
-    const emailSent = false;
-
-    return { invitation, link, emailSent };
+    return { invitation, link: redirectTo, emailSent };
   },
 
   /** Get all invitations for the current user's org */
