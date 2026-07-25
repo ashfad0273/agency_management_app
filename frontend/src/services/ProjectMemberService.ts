@@ -38,7 +38,12 @@ export const ProjectMemberService = {
     if (error) throw error;
     if (!data) return [];
 
-    return data.map((item: any) => {
+    interface ProjectMemberJoin {
+      project_id: string;
+      projects: { id: string; name: string; description: string | null; organization_id: string; status: string; deadline: string | null } | { id: string; name: string; description: string | null; organization_id: string; status: string; deadline: string | null }[];
+    }
+
+    return (data as unknown as ProjectMemberJoin[]).map((item) => {
       const p = Array.isArray(item.projects) ? item.projects[0] : item.projects;
       return p as Project;
     });

@@ -74,75 +74,64 @@ LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = public
 AS $$
 DECLARE
-  org_id UUID;
-  org_name TEXT;
-  channel_id UUID;
-  invite_token TEXT;
-  invite_record RECORD;
+  v_org_id UUID;
+  v_org_name TEXT;
+  v_channel_id UUID;
+  v_invite_token TEXT;
+  v_invite_record RECORD;
 BEGIN
-  -- Check if user came through an invite
-  invite_token := NEW.raw_user_meta_data ->> 'invite_token';
+  v_invite_token := NEW.raw_user_meta_data ->> 'invite_token';
 
-  IF invite_token IS NOT NULL THEN
-    -- Look up the pending invitation
-    SELECT * INTO invite_record FROM public.invitations
-    WHERE token = invite_token
+  IF v_invite_token IS NOT NULL THEN
+    SELECT * INTO v_invite_record FROM public.invitations
+    WHERE token = v_invite_token
     AND email = NEW.email
     AND status = 'pending'
     AND expires_at > now();
 
     IF FOUND THEN
-      org_id := invite_record.organization_id;
-      -- Mark invitation as accepted
-      UPDATE public.invitations SET status = 'accepted' WHERE id = invite_record.id;
+      v_org_id := v_invite_record.organization_id;
+      UPDATE public.invitations SET status = 'accepted' WHERE id = v_invite_record.id;
     ELSE
-      -- Invalid or expired token — fall back to creating a new org
-      org_name := split_part(NEW.email, '@', 2);
+      v_org_name := split_part(NEW.email, '@', 2);
       INSERT INTO public.organizations (name, domain)
-      VALUES (org_name, NEW.email)
-      RETURNING id INTO org_id;
-      -- Seed default roles if RBAC schema has been applied
+      VALUES (v_org_name, NEW.email)
+      RETURNING id INTO v_org_id;
       IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'seed_default_roles') THEN
-        PERFORM public.seed_default_roles(org_id);
+        PERFORM public.seed_default_roles(v_org_id);
       END IF;
     END IF;
   ELSE
-    -- No invite, create a new org (existing behavior)
-    org_name := COALESCE(
+    v_org_name := COALESCE(
       NEW.raw_user_meta_data ->> 'organization_name',
       split_part(NEW.email, '@', 2),
       'My Organization'
     );
 
     INSERT INTO public.organizations (name, domain)
-    VALUES (org_name, NEW.email)
-    RETURNING id INTO org_id;
+    VALUES (v_org_name, NEW.email)
+    RETURNING id INTO v_org_id;
 
-    -- Seed default roles if RBAC schema has been applied
     IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'seed_default_roles') THEN
-      PERFORM public.seed_default_roles(org_id);
+      PERFORM public.seed_default_roles(v_org_id);
     END IF;
   END IF;
 
-  -- Create profile with the resolved organization
   INSERT INTO public.profiles (id, organization_id, email, role)
-  VALUES (NEW.id, org_id, NEW.email, CASE WHEN invite_token IS NOT NULL THEN 'employee' ELSE 'admin' END);
+  VALUES (NEW.id, v_org_id, NEW.email, CASE WHEN v_invite_token IS NOT NULL THEN 'employee' ELSE 'admin' END);
 
-  -- Create #general channel for the org (if it doesn't exist yet)
   INSERT INTO public.channels (organization_id, name, description, created_by)
-  VALUES (org_id, 'general', 'General discussion', NEW.id)
+  VALUES (v_org_id, 'general', 'General discussion', NEW.id)
   ON CONFLICT (organization_id, name) DO NOTHING
-  RETURNING id INTO channel_id;
+  RETURNING id INTO v_channel_id;
 
-  -- If the channel already existed, fetch its id
-  IF channel_id IS NULL THEN
-    SELECT id INTO channel_id FROM public.channels
-    WHERE organization_id = org_id AND name = 'general';
+  IF v_channel_id IS NULL THEN
+    SELECT id INTO v_channel_id FROM public.channels
+    WHERE organization_id = v_org_id AND name = 'general';
   END IF;
 
-  -- Add user as member of #general (safe if already a member)
   INSERT INTO public.channel_members (channel_id, user_id, organization_id, role)
-  VALUES (channel_id, NEW.id, org_id, 'member')
+  VALUES (v_channel_id, NEW.id, v_org_id, 'member')
   ON CONFLICT (channel_id, user_id) DO NOTHING;
 
   RETURN NEW;

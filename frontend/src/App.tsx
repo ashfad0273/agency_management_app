@@ -13,7 +13,7 @@ import SettingsPage from './pages/SettingsPage';
 import InvitationsPage from './pages/InvitationsPage';
 import DashboardPage from './pages/DashboardPage';
 import OrganizationPage from './pages/OrganizationPage';
-import { tokens, gridBackground } from './theme/tokens';
+import { tokens, gridBackground, sidebarWidth, sidebarCollapsedWidth } from './theme/tokens';
 
 interface Toast {
   id: number;
@@ -136,7 +136,7 @@ function App() {
             flex: 1,
             overflow: 'auto',
             padding: 24,
-            marginLeft: 0,
+            marginLeft: sidebarOpen ? sidebarWidth : sidebarCollapsedWidth,
             transition: 'margin-left 0.3s ease-in-out',
           }}>
             <Routes>

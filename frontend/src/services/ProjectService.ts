@@ -27,7 +27,7 @@ export interface CreateProjectInput {
 }
 
 export const ProjectService = {
-  async createProject(input: CreateProjectInput) {
+  async createProject(input: CreateProjectInput): Promise<Project> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('No user logged in');
 

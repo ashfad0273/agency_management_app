@@ -164,7 +164,7 @@ export const RoleService = {
       .eq('id', roleId)
       .single();
 
-    const updateData: Record<string, any> = { role_id: roleId };
+    const updateData: { role_id: string; role?: string } = { role_id: roleId };
     if (role?.name) {
       updateData.role = role.name.toLowerCase();
     }
@@ -247,12 +247,20 @@ export const RoleService = {
 
     if (error) throw error;
 
-    return (data ?? []).map((p: any) => ({
+    type ProfileRow = {
+      id: string;
+      email: string | null;
+      role: string;
+      role_id: string | null;
+      roles: { name: string }[] | null;
+    };
+
+    return (data ?? []).map((p: ProfileRow) => ({
       id: p.id,
       email: p.email,
       role: p.role,
       role_id: p.role_id,
-      role_name: p.roles?.name ?? null,
+      role_name: Array.isArray(p.roles) ? p.roles[0]?.name ?? null : null,
     }));
   },
 };

@@ -2,6 +2,7 @@ import { supabase } from '../api/supabaseClient';
 
 export interface Message {
   id: string;
+  organization_id: string;
   project_id: string | null;
   channel_id: string | null;
   conversation_id: string | null;
@@ -9,6 +10,15 @@ export interface Message {
   content: string;
   created_at: string;
   profiles?: { email: string | null } | null;
+}
+
+interface MessageInsert {
+  content: string;
+  sender_id: string;
+  organization_id: string;
+  conversation_id?: string | null;
+  channel_id?: string | null;
+  project_id?: string | null;
 }
 
 export interface UnreadCount {
@@ -61,7 +71,7 @@ export const ChatService = {
 
     if (profileError || !profile) throw new Error('Profile not found');
 
-    const message: Record<string, any> = {
+    const message: MessageInsert = {
       content,
       sender_id: user.id,
       organization_id: profile.organization_id,

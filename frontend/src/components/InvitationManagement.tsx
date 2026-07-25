@@ -44,7 +44,7 @@ export default function InvitationManagement() {
     if (!inviteEmail.trim()) return;
     setSending(true);
     try {
-      const { emailSent, link } = await InviteService.createInvitation(inviteEmail.trim());
+      const { emailSent, link } = await InviteService.createInvitation(inviteEmail.trim(), inviteRole);
       setInviteEmail('');
       setShowModal(false);
       if (emailSent) {
@@ -89,13 +89,10 @@ export default function InvitationManagement() {
   };
 
   const statusBadge = (status: string) => {
-    const variantMap: Record<string, 'warning' | 'info' | 'neutral' | 'success'> = {
-      pending: 'warning',
-      accepted: 'success',
-      expired: 'neutral',
-      cancelled: 'neutral',
-    };
-    return sharedStyles.badge(variantMap[status] || 'neutral');
+    const variant = status === 'pending' ? 'warning' as const
+      : status === 'accepted' ? 'success' as const
+      : 'neutral' as const;
+    return sharedStyles.badge(variant);
   };
 
   const formatDate = (dateStr: string) => {

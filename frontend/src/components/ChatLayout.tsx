@@ -17,11 +17,7 @@ export default function ChatLayout() {
   const { can } = usePermission();
   const canManageChannels = can(Permissions.Chat.ManageChannels);
 
-  const [activeChat, setActiveChat] = useState<ActiveChat>(() => ({
-    type: 'channel',
-    channelId: '',
-    channelName: '#general',
-  }));
+  const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
   const [channels, setChannels] = useState<ChannelWithMembership[]>([]);
   const [conversations, setConversations] = useState<ConversationWithUser[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -43,10 +39,10 @@ export default function ChatLayout() {
     setTimeout(() => setFeedback(null), 3000);
   };
 
-  const activeChannelId = activeChat.type === 'channel' ? (activeChat.channelId || undefined) : undefined;
-  const activeProjectId = activeChat.type === 'project' ? activeChat.projectId : undefined;
-  const activeConversationId = activeChat.type === 'dm' ? activeChat.conversationId : undefined;
-  const isActiveChannel = activeChat.type === 'channel';
+  const activeChannelId = activeChat?.type === 'channel' ? (activeChat.channelId || undefined) : undefined;
+  const activeProjectId = activeChat?.type === 'project' ? activeChat.projectId : undefined;
+  const activeConversationId = activeChat?.type === 'dm' ? activeChat.conversationId : undefined;
+  const isActiveChannel = activeChat?.type === 'channel';
 
   useEffect(() => {
     loadData();
@@ -187,11 +183,15 @@ export default function ChatLayout() {
     }
   };
 
-  const activeTitle = activeChat.type === 'channel'
+  const activeTitle = activeChat?.type === 'channel'
     ? activeChat.channelName
-    : activeChat.type === 'dm'
+    : activeChat?.type === 'dm'
     ? activeChat.otherUserName
-    : activeChat.projectName;
+    : activeChat?.projectName ?? '';
+
+  const isChannelActive = (chId: string) => activeChat?.type === 'channel' && activeChat.channelId === chId;
+  const isDmActive = (convId: string) => activeChat?.type === 'dm' && activeChat.conversationId === convId;
+  const isProjectActive = (projId: string) => activeChat?.type === 'project' && activeChat.projectId === projId;
 
   const sidebarItemStyle = (isActive: boolean, _hoverKey: string | null, itemKey: string) => ({
     padding: '7px 12px 7px 12px',
@@ -299,7 +299,7 @@ export default function ChatLayout() {
                   role="button"
                   tabIndex={0}
                   style={sidebarItemStyle(
-                    activeChat.type === 'channel' && activeChat.channelId === ch.id,
+                    isChannelActive(ch.id),
                     hoveredItem,
                     'ch:' + ch.id,
                   )}
@@ -383,7 +383,7 @@ export default function ChatLayout() {
                   role="button"
                   tabIndex={0}
                   style={sidebarItemStyle(
-                    activeChat.type === 'dm' && activeChat.conversationId === dm.conversation_id,
+                    isDmActive(dm.conversation_id),
                     hoveredItem,
                     'dm:' + dm.conversation_id,
                   )}
@@ -417,11 +417,11 @@ export default function ChatLayout() {
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelectProject(p); } }}
                 role="button"
                 tabIndex={0}
-                style={sidebarItemStyle(
-                  activeChat.type === 'project' && activeChat.projectId === p.id,
-                  hoveredItem,
-                  'proj:' + p.id,
-                )}
+                  style={sidebarItemStyle(
+                    isProjectActive(p.id),
+                    hoveredItem,
+                    'proj:' + p.id,
+                  )}
                 onMouseEnter={() => setHoveredItem('proj:' + p.id)}
                 onMouseLeave={() => setHoveredItem(null)}
               >
@@ -439,12 +439,25 @@ export default function ChatLayout() {
 
       {/* Main chat area */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <ChatBox
-          projectId={activeProjectId}
-          channelId={activeChannelId}
-          conversationId={activeConversationId}
-          title={activeTitle}
-        />
+        {activeChat ? (
+          <ChatBox
+            projectId={activeProjectId}
+            channelId={activeChannelId}
+            conversationId={activeConversationId}
+            title={activeTitle}
+          />
+        ) : (
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: tokens.textDim,
+            fontSize: fontSize.base,
+          }}>
+            Select a channel or conversation to start chatting
+          </div>
+        )}
       </div>
     </div>
   );

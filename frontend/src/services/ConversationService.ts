@@ -38,7 +38,7 @@ export const ConversationService = {
 
     if (otherError || !otherParticipants) return [];
 
-    return otherParticipants.map((p: any) => {
+    return otherParticipants.map((p: { conversation_id: string; user_id: string; profiles: { email: string | null } | { email: string | null }[] }) => {
       const profile = Array.isArray(p.profiles) ? p.profiles[0] : p.profiles;
       const email = profile?.email ?? null;
       return {

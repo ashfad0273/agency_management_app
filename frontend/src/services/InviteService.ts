@@ -15,7 +15,7 @@ export interface Invitation {
 
 export const InviteService = {
   /** Create a pending invitation and send a magic link email via Supabase Auth */
-  async createInvitation(email: string): Promise<{ invitation: Invitation; link: string; emailSent: boolean }> {
+  async createInvitation(email: string, role: string = 'employee'): Promise<{ invitation: Invitation; link: string; emailSent: boolean }> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('No user logged in');
 
@@ -43,6 +43,7 @@ export const InviteService = {
         organization_id: profile.organization_id,
         organization_name: org.name,
         invited_by: user.id,
+        role,
       }])
       .select()
       .single();
@@ -104,9 +105,21 @@ export const InviteService = {
 
   /** Get all pending invitations for the current user's org */
   async getPendingInvitations(): Promise<Invitation[]> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('No user logged in');
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', user.id)
+      .single();
+
+    if (!profile) throw new Error('Profile not found');
+
     const { data, error } = await supabase
       .from('invitations')
       .select('*')
+      .eq('organization_id', profile.organization_id)
       .eq('status', 'pending')
       .order('created_at', { ascending: false });
 
