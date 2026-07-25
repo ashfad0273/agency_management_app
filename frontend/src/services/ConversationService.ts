@@ -38,12 +38,16 @@ export const ConversationService = {
 
     if (otherError || !otherParticipants) return [];
 
-    return otherParticipants.map((p: { conversation_id: string; user_id: string; profiles: { email: string | null } }) => ({
-      conversation_id: p.conversation_id,
-      other_user_id: p.user_id,
-      other_user_email: p.profiles.email ?? p.user_id,
-      other_user_display: p.profiles.email ? p.profiles.email.split('@')[0] : p.user_id.substring(0, 5),
-    }));
+    return otherParticipants.map((p: any) => {
+      const profile = Array.isArray(p.profiles) ? p.profiles[0] : p.profiles;
+      const email = profile?.email ?? null;
+      return {
+        conversation_id: p.conversation_id,
+        other_user_id: p.user_id,
+        other_user_email: email ?? p.user_id,
+        other_user_display: email ? email.split('@')[0] : p.user_id.substring(0, 5),
+      };
+    });
   },
 
   /** Find an existing DM conversation with a user, or create a new one */
