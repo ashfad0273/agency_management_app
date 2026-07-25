@@ -191,67 +191,32 @@ CREATE INDEX IF NOT EXISTS idx_conversation_participants_organization_id ON conv
 CREATE INDEX IF NOT EXISTS idx_conversation_participants_conversation_id ON conversation_participants(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_conversation_participants_user_id ON conversation_participants(user_id);
 
--- Messages RLS Policies
+-- Messages RLS Policies (pure org-based — no cross-table subqueries)
+DROP POLICY IF EXISTS "messages_select" ON messages;
+DROP POLICY IF EXISTS "messages_insert" ON messages;
+DROP POLICY IF EXISTS "messages_update" ON messages;
+DROP POLICY IF EXISTS "messages_delete" ON messages;
+DROP POLICY IF EXISTS "msg_select" ON messages;
+DROP POLICY IF EXISTS "msg_insert" ON messages;
 DROP POLICY IF EXISTS "Users can view messages in their org or assigned projects" ON messages;
-CREATE POLICY "Users can view messages in their org or assigned projects" ON messages
-FOR SELECT USING (
-  organization_id = public.get_user_organization_id()
-  AND (
-    (channel_id IS NOT NULL AND EXISTS (
-      SELECT 1 FROM channel_members
-      WHERE channel_members.channel_id = messages.channel_id
-      AND channel_members.user_id = auth.uid()
-    ))
-    OR
-    (project_id IS NOT NULL AND EXISTS (
-      SELECT 1 FROM project_members
-      WHERE project_members.project_id = messages.project_id
-      AND project_members.user_id = auth.uid()
-    ))
-    OR
-    (conversation_id IS NOT NULL AND EXISTS (
-      SELECT 1 FROM conversation_participants
-      WHERE conversation_participants.conversation_id = messages.conversation_id
-      AND conversation_participants.user_id = auth.uid()
-    ))
-    OR
-    (project_id IS NULL AND channel_id IS NULL AND conversation_id IS NULL)
-  )
-);
-
 DROP POLICY IF EXISTS "Users can insert messages in their org or assigned projects" ON messages;
-CREATE POLICY "Users can insert messages in their org or assigned projects" ON messages
-FOR INSERT WITH CHECK (
-  organization_id = public.get_user_organization_id()
-  AND (
-    (channel_id IS NOT NULL AND EXISTS (
-      SELECT 1 FROM channel_members
-      WHERE channel_members.channel_id = messages.channel_id
-      AND channel_members.user_id = auth.uid()
-    ))
-    OR
-    (project_id IS NOT NULL AND EXISTS (
-      SELECT 1 FROM project_members
-      WHERE project_members.project_id = messages.project_id
-      AND project_members.user_id = auth.uid()
-    ))
-    OR
-    (conversation_id IS NOT NULL AND EXISTS (
-      SELECT 1 FROM conversation_participants
-      WHERE conversation_participants.conversation_id = messages.conversation_id
-      AND conversation_participants.user_id = auth.uid()
-    ))
-    OR
-    (project_id IS NULL AND channel_id IS NULL AND conversation_id IS NULL)
-  )
+DROP POLICY IF EXISTS "Users can update their own messages" ON messages;
+DROP POLICY IF EXISTS "Users can delete their own messages" ON messages;
+
+CREATE POLICY "messages_select" ON messages
+FOR SELECT USING (
+  organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid() LIMIT 1)
 );
 
-DROP POLICY IF EXISTS "Users can update their own messages" ON messages;
-CREATE POLICY "Users can update their own messages" ON messages
+CREATE POLICY "messages_insert" ON messages
+FOR INSERT WITH CHECK (
+  organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid() LIMIT 1)
+);
+
+CREATE POLICY "messages_update" ON messages
 FOR UPDATE USING (sender_id = auth.uid()) WITH CHECK (sender_id = auth.uid());
 
-DROP POLICY IF EXISTS "Users can delete their own messages" ON messages;
-CREATE POLICY "Users can delete their own messages" ON messages
+CREATE POLICY "messages_delete" ON messages
 FOR DELETE USING (sender_id = auth.uid());
 
 

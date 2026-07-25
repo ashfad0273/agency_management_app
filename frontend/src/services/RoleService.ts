@@ -215,7 +215,7 @@ export const RoleService = {
     };
   },
 
-  /** Get all profiles with their role info */
+  /** Get all profiles with their role info (two-step query avoids FK-dependent join) */
   async getProfilesWithRoles(): Promise<Array<{
     id: string;
     email: string | null;
@@ -226,41 +226,39 @@ export const RoleService = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('No user logged in');
 
-    const { data: profile } = await supabase
+    const { data: myProfile } = await supabase
       .from('profiles')
       .select('organization_id')
       .eq('id', user.id)
       .single();
 
-    if (!profile) throw new Error('Profile not found');
+    if (!myProfile) throw new Error('Profile not found');
 
-    const { data, error } = await supabase
+    // Step 1: fetch all profiles in the org
+    const { data: profiles, error } = await supabase
       .from('profiles')
-      .select(`
-        id,
-        email,
-        role,
-        role_id,
-        roles!left(name)
-      `)
-      .eq('organization_id', profile.organization_id);
+      .select('id, email, role, role_id')
+      .eq('organization_id', myProfile.organization_id);
 
     if (error) throw error;
 
-    type ProfileRow = {
-      id: string;
-      email: string | null;
-      role: string;
-      role_id: string | null;
-      roles: { name: string }[] | null;
-    };
+    // Step 2: fetch all roles for the org to build a role_id → name map
+    const { data: roles } = await supabase
+      .from('roles')
+      .select('id, name')
+      .eq('organization_id', myProfile.organization_id);
 
-    return (data ?? []).map((p: ProfileRow) => ({
+    const roleNameMap: Record<string, string> = {};
+    for (const r of roles ?? []) {
+      roleNameMap[r.id] = r.name;
+    }
+
+    return (profiles ?? []).map((p) => ({
       id: p.id,
       email: p.email,
       role: p.role,
       role_id: p.role_id,
-      role_name: Array.isArray(p.roles) ? p.roles[0]?.name ?? null : null,
+      role_name: p.role_id ? (roleNameMap[p.role_id] ?? null) : null,
     }));
   },
 };

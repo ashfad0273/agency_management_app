@@ -130,12 +130,24 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 ALTER TABLE project_members ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN
-  CREATE POLICY "Users can view project members in their org" ON project_members FOR SELECT USING (organization_id = public.get_user_organization_id());
-  CREATE POLICY "Users can insert project members in their org" ON project_members FOR INSERT WITH CHECK (organization_id = public.get_user_organization_id());
-  CREATE POLICY "Users can update project members in their org" ON project_members FOR UPDATE USING (organization_id = public.get_user_organization_id()) WITH CHECK (organization_id = public.get_user_organization_id());
-  CREATE POLICY "Users can delete project members in their org" ON project_members FOR DELETE USING (organization_id = public.get_user_organization_id());
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DROP POLICY IF EXISTS "project_members_select" ON project_members;
+DROP POLICY IF EXISTS "project_members_insert" ON project_members;
+DROP POLICY IF EXISTS "project_members_update" ON project_members;
+DROP POLICY IF EXISTS "project_members_delete" ON project_members;
+DROP POLICY IF EXISTS "Users can view project members in their org" ON project_members;
+DROP POLICY IF EXISTS "Users can insert project members in their org" ON project_members;
+DROP POLICY IF EXISTS "Users can update project members in their org" ON project_members;
+DROP POLICY IF EXISTS "Users can delete project members in their org" ON project_members;
+CREATE POLICY "project_members_select" ON project_members
+  FOR SELECT USING (
+    user_id = auth.uid()
+    OR project_id IN (
+      SELECT id FROM projects
+      WHERE organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid() LIMIT 1)
+    )
+  );
+CREATE POLICY "project_members_insert" ON project_members
+  FOR INSERT WITH CHECK (true);
 
 -- =============================================
 -- 7. Invitations Table
@@ -210,43 +222,60 @@ CREATE TABLE IF NOT EXISTS channel_members (
 ALTER TABLE channels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE channel_members ENABLE ROW LEVEL SECURITY;
 
--- Channels RLS Policies
+-- Channels RLS Policies (non-recursive — no channel_members subquery in SELECT)
+DROP POLICY IF EXISTS "channels_select" ON channels;
+DROP POLICY IF EXISTS "channels_insert" ON channels;
+DROP POLICY IF EXISTS "channels_update" ON channels;
+DROP POLICY IF EXISTS "channels_delete" ON channels;
 DROP POLICY IF EXISTS "Users can view channels in their org" ON channels;
-CREATE POLICY "Users can view channels in their org" ON channels
-    FOR SELECT USING (
-        organization_id = public.get_user_organization_id()
-        AND (
-            is_private = false
-            OR EXISTS (
-                SELECT 1 FROM channel_members
-                WHERE channel_members.channel_id = id
-                AND channel_members.user_id = auth.uid()
-            )
-        )
-    );
 DROP POLICY IF EXISTS "Users can insert channels in their org" ON channels;
-CREATE POLICY "Users can insert channels in their org" ON channels
-    FOR INSERT WITH CHECK (organization_id = public.get_user_organization_id());
 DROP POLICY IF EXISTS "Users can update channels in their org" ON channels;
-CREATE POLICY "Users can update channels in their org" ON channels
-    FOR UPDATE USING (organization_id = public.get_user_organization_id());
 DROP POLICY IF EXISTS "Users can delete channels in their org" ON channels;
-CREATE POLICY "Users can delete channels in their org" ON channels
-    FOR DELETE USING (organization_id = public.get_user_organization_id());
 
--- Channel Members RLS Policies
+CREATE POLICY "channels_select" ON channels
+    FOR SELECT USING (
+        organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())
+    );
+CREATE POLICY "channels_insert" ON channels
+    FOR INSERT WITH CHECK (
+        organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())
+    );
+CREATE POLICY "channels_update" ON channels
+    FOR UPDATE USING (
+        organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())
+    );
+CREATE POLICY "channels_delete" ON channels
+    FOR DELETE USING (
+        organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())
+    );
+
+-- Channel Members RLS Policies (non-recursive — user_id = auth.uid() avoids self-reference)
+DROP POLICY IF EXISTS "channel_members_select" ON channel_members;
+DROP POLICY IF EXISTS "channel_members_insert" ON channel_members;
+DROP POLICY IF EXISTS "channel_members_update" ON channel_members;
+DROP POLICY IF EXISTS "channel_members_delete" ON channel_members;
 DROP POLICY IF EXISTS "Users can view channel members in their org" ON channel_members;
-CREATE POLICY "Users can view channel members in their org" ON channel_members
-    FOR SELECT USING (organization_id = public.get_user_organization_id());
 DROP POLICY IF EXISTS "Users can insert channel members in their org" ON channel_members;
-CREATE POLICY "Users can insert channel members in their org" ON channel_members
-    FOR INSERT WITH CHECK (organization_id = public.get_user_organization_id());
 DROP POLICY IF EXISTS "Users can update channel members in their org" ON channel_members;
-CREATE POLICY "Users can update channel members in their org" ON channel_members
-    FOR UPDATE USING (organization_id = public.get_user_organization_id());
 DROP POLICY IF EXISTS "Users can delete channel members in their org" ON channel_members;
-CREATE POLICY "Users can delete channel members in their org" ON channel_members
-    FOR DELETE USING (organization_id = public.get_user_organization_id());
+
+CREATE POLICY "channel_members_select" ON channel_members
+    FOR SELECT USING (
+        user_id = auth.uid()
+        OR organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())
+    );
+CREATE POLICY "channel_members_insert" ON channel_members
+    FOR INSERT WITH CHECK (
+        organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())
+    );
+CREATE POLICY "channel_members_update" ON channel_members
+    FOR UPDATE USING (
+        organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())
+    );
+CREATE POLICY "channel_members_delete" ON channel_members
+    FOR DELETE USING (
+        organization_id = (SELECT organization_id FROM profiles WHERE id = auth.uid())
+    );
 
 -- =============================================
 -- 8. RBAC Tables

@@ -10,6 +10,15 @@ export interface Message {
   content: string;
   created_at: string;
   profiles?: { email: string | null } | null;
+  message_reactions?: MessageReaction[] | null;
+}
+
+export interface MessageReaction {
+  id: string;
+  message_id: string;
+  user_id: string;
+  emoji: string;
+  created_at: string;
 }
 
 interface MessageInsert {
@@ -79,14 +88,20 @@ export const ChatService = {
 
     if (conversationId) {
       message.conversation_id = conversationId;
+      message.channel_id = null;
       message.project_id = null;
     } else if (channelId) {
       message.channel_id = channelId;
+      message.conversation_id = null;
       message.project_id = null;
     } else if (projectId === null) {
       message.project_id = null;
+      message.channel_id = null;
+      message.conversation_id = null;
     } else if (projectId) {
       message.project_id = projectId;
+      message.channel_id = null;
+      message.conversation_id = null;
     }
 
     const { error } = await supabase
@@ -222,5 +237,68 @@ export const ChatService = {
       return data.email.split('@')[0];
     }
     return userId.substring(0, 5);
+  },
+
+  // --- Message Reactions ---
+
+  /** Get reactions for a message */
+  async getReactions(messageId: string): Promise<MessageReaction[]> {
+    const { data, error } = await supabase
+      .from('message_reactions')
+      .select('*')
+      .eq('message_id', messageId);
+
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  /** Toggle a reaction on a message (add if not present, remove if present) */
+  async toggleReaction(messageId: string, emoji: string): Promise<boolean> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not logged in');
+
+    // Check if reaction already exists
+    const { data: existing } = await supabase
+      .from('message_reactions')
+      .select('id')
+      .eq('message_id', messageId)
+      .eq('user_id', user.id)
+      .eq('emoji', emoji)
+      .maybeSingle();
+
+    if (existing) {
+      const { error } = await supabase
+        .from('message_reactions')
+        .delete()
+        .eq('id', existing.id);
+      if (error) throw error;
+      return false; // removed
+    }
+
+    const { error } = await supabase
+      .from('message_reactions')
+      .insert([{ message_id: messageId, user_id: user.id, emoji }]);
+    if (error) throw error;
+    return true; // added
+  },
+
+  // --- Message Management ---
+
+  /** Delete a message (only the sender can) */
+  async deleteMessage(messageId: string): Promise<void> {
+    const { error } = await supabase
+      .from('messages')
+      .delete()
+      .eq('id', messageId);
+    if (error) throw error;
+  },
+
+  /** Edit a message (only the sender can, within reasonable time) */
+  async editMessage(messageId: string, content: string): Promise<void> {
+    const { error } = await supabase
+      .from('messages')
+      .update({ content })
+      .eq('id', messageId);
+    if (error) throw error;
   },
 };

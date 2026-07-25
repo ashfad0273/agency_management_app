@@ -53,27 +53,14 @@ export const InviteService = {
     const invitation = data as Invitation;
     const link = `${window.location.origin}/?invite=${invitation.token}`;
 
-    // Send a magic link email via Supabase's built-in auth email system.
-    // This creates the user (if needed) with the invite_token in their metadata.
-    // The handle_new_user trigger will then process the invite and add them to the org.
-    let emailSent = false;
-    try {
-      const { error: otpError } = await supabase.auth.signInWithOtp({
-        email: invitation.email,
-        options: {
-          shouldCreateUser: true,
-          data: { invite_token: invitation.token },
-          emailRedirectTo: window.location.origin,
-        },
-      });
-      if (!otpError) {
-        emailSent = true;
-      } else {
-        console.warn('Failed to send magic link email:', otpError);
-      }
-    } catch (otpError) {
-      console.warn('Could not send magic link email:', otpError);
-    }
+    // NOTE: We do NOT auto-create the user here via signInWithOtp/shouldCreateUser
+    // because that would fire handle_new_user immediately,
+    // prematurely marking the invitation as 'accepted'.
+    // Instead, the admin shares the invite link.
+    // When the recipient visits the link and signs up via the Auth component,
+    // handle_new_user will process the invite_token from their signup metadata.
+
+    const emailSent = false;
 
     return { invitation, link, emailSent };
   },

@@ -85,19 +85,19 @@ export const ConversationService = {
       if (match) return match.conversation_id;
     }
 
-    // No existing conversation — create a new one
-    const { data: conversation, error: convoError } = await supabase
+    // No existing conversation — create a new one with client-side UUID
+    const conversationId = crypto.randomUUID();
+
+    const { error: convoError } = await supabase
       .from('conversations')
-      .insert([{ organization_id: profile.organization_id }])
-      .select()
-      .single();
+      .insert([{ id: conversationId, organization_id: profile.organization_id }]);
 
     if (convoError) throw convoError;
 
     // Add both participants
     const participants = [
-      { conversation_id: conversation.id, user_id: user.id, organization_id: profile.organization_id },
-      { conversation_id: conversation.id, user_id: otherUserId, organization_id: profile.organization_id },
+      { conversation_id: conversationId, user_id: user.id, organization_id: profile.organization_id },
+      { conversation_id: conversationId, user_id: otherUserId, organization_id: profile.organization_id },
     ];
 
     const { error: partError } = await supabase
@@ -106,7 +106,42 @@ export const ConversationService = {
 
     if (partError) throw partError;
 
-    return conversation.id;
+    return conversationId;
+  },
+
+  /** Get all org members with display info for DM list */
+  async getOrgMembersForDm(): Promise<Array<{ id: string; email: string | null; display: string; role_name: string | null }>> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', user.id)
+      .single();
+
+    if (!profile) return [];
+
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, email, role, role_id')
+      .eq('organization_id', profile.organization_id)
+      .neq('id', user.id);
+
+    const { data: roles } = await supabase
+      .from('roles')
+      .select('id, name')
+      .eq('organization_id', profile.organization_id);
+
+    const roleMap: Record<string, string> = {};
+    for (const r of roles ?? []) roleMap[r.id] = r.name;
+
+    return (profiles ?? []).map(p => ({
+      id: p.id,
+      email: p.email,
+      display: p.email ? p.email.split('@')[0] : p.id.substring(0, 5),
+      role_name: p.role_id ? (roleMap[p.role_id] ?? p.role ?? null) : (p.role ?? null),
+    }));
   },
 
   /** Search for users in the same org by email prefix */

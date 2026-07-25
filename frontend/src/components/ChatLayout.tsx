@@ -8,6 +8,13 @@ import { ChatService } from '../services/ChatService';
 import { usePermission, Permissions } from '../hooks/usePermission';
 import { tokens, sharedStyles, radius, fontSize } from '../theme/tokens';
 
+interface OrgMemberDisplay {
+  id: string;
+  email: string | null;
+  display: string;
+  role_name: string | null;
+}
+
 type ActiveChat =
   | { type: 'channel'; channelId: string; channelName: string }
   | { type: 'project'; projectId: string; projectName: string }
@@ -20,19 +27,17 @@ export default function ChatLayout() {
   const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
   const [channels, setChannels] = useState<ChannelWithMembership[]>([]);
   const [conversations, setConversations] = useState<ConversationWithUser[]>([]);
+  const [orgMembers, setOrgMembers] = useState<OrgMemberDisplay[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [showCreateChannel, setShowCreateChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelDesc, setNewChannelDesc] = useState('');
   const [newChannelPrivate, setNewChannelPrivate] = useState(false);
-  const [showNewDm, setShowNewDm] = useState(false);
-  const [dmSearchQuery, setDmSearchQuery] = useState('');
-  const [dmSearchResults, setDmSearchResults] = useState<{ id: string; email: string; display: string }[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(new Set());
   const [feedback, setFeedback] = useState<{ type: 'error'; message: string } | null>(null);
   const [creatingChannel, setCreatingChannel] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const showFeedback = (type: 'error', message: string) => {
     setFeedback({ type, message });
@@ -71,24 +76,6 @@ export default function ChatLayout() {
   }, [isActiveChannel, activeChannelId]);
 
   useEffect(() => {
-    if (!dmSearchQuery.trim()) {
-      setDmSearchResults([]);
-      return;
-    }
-    setSearching(true);
-    const timer = setTimeout(async () => {
-      try {
-        const results = await ConversationService.searchUsers(dmSearchQuery.trim());
-        setDmSearchResults(results);
-      } catch {
-        setDmSearchResults([]);
-      }
-      setSearching(false);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [dmSearchQuery]);
-
-  useEffect(() => {
     let ignore = false;
 
     const fetchUnreads = async () => {
@@ -115,14 +102,17 @@ export default function ChatLayout() {
 
   const loadData = async () => {
     try {
-      const [channelData, conversationData, projectData] = await Promise.all([
+      const [channelData, conversationData, projectData, memberData] = await Promise.all([
         ChannelService.getChannelsWithMembership().catch(() => undefined),
         ConversationService.getConversations().catch(() => undefined),
         ProjectMemberService.getUserProjects().catch(() => undefined),
+        ConversationService.getOrgMembersForDm().catch(() => [] as OrgMemberDisplay[]),
       ]);
       if (channelData !== undefined) setChannels(channelData);
       if (conversationData !== undefined) setConversations(conversationData);
       if (projectData !== undefined) setProjects(projectData);
+      if (memberData !== undefined) setOrgMembers(memberData);
+      setLoaded(true);
     } catch (error) {
       console.error('Error loading chat data:', error);
     }
@@ -138,13 +128,23 @@ export default function ChatLayout() {
     setActiveChat({ type: 'dm', conversationId: dm.conversation_id, otherUserName: dm.other_user_display });
     ChatService.markAsRead(undefined, undefined, dm.conversation_id);
     setUnreadCounts((prev) => { const next = { ...prev }; delete next['dm:' + dm.conversation_id]; return next; });
-    setShowNewDm(false);
   };
 
   const handleSelectProject = (project: Project) => {
     setActiveChat({ type: 'project', projectId: project.id, projectName: project.name });
     ChatService.markAsRead(project.id);
     setUnreadCounts((prev) => { const next = { ...prev }; delete next[project.id]; return next; });
+  };
+
+  const handleStartDm = async (otherUserId: string) => {
+    try {
+      const conversationId = await ConversationService.createOrGetConversation(otherUserId);
+      await loadData();
+      const dm = (await ConversationService.getConversations()).find(d => d.conversation_id === conversationId);
+      if (dm) handleSelectDm(dm);
+    } catch (error) {
+      console.error('Error starting DM:', error);
+    }
   };
 
   const handleCreateChannel = async (e: FormEvent) => {
@@ -157,31 +157,52 @@ export default function ChatLayout() {
         newChannelDesc.trim(),
         newChannelPrivate,
       );
+      // Add selected members to private channel
+      if (newChannelPrivate && selectedMemberIds.size > 0) {
+        const results = await Promise.allSettled(
+          Array.from(selectedMemberIds).map(uid =>
+            ChannelService.addMember(channel.id, uid, 'member')
+          )
+        );
+        const failures = results.filter(r => r.status === 'rejected');
+        if (failures.length > 0) {
+          console.warn(`${failures.length} member(s) could not be added to private channel`);
+          showFeedback('error', `Channel created but ${failures.length} member(s) could not be added`);
+        }
+      }
       setNewChannelName('');
       setNewChannelDesc('');
       setNewChannelPrivate(false);
+      setSelectedMemberIds(new Set());
       setShowCreateChannel(false);
       await loadData();
       setActiveChat({ type: 'channel', channelId: channel.id, channelName: `#${channel.name}` });
-    } catch (error) {
+    } catch (error: unknown) {
+      let errMsg = 'Unknown error';
+      if (error instanceof Error) {
+        errMsg = error.message;
+      } else if (typeof error === 'object' && error !== null) {
+        const obj = error as Record<string, unknown>;
+        errMsg = String(obj.message ?? obj.error ?? obj.details ?? JSON.stringify(error));
+      }
       console.error('Error creating channel:', error);
-      showFeedback('error', 'Error creating channel: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      showFeedback('error', 'Error creating channel: ' + errMsg);
     }
     setCreatingChannel(false);
   };
 
-  const handleStartDm = async (otherUserId: string) => {
-    try {
-      const conversationId = await ConversationService.createOrGetConversation(otherUserId);
-      await loadData();
-      const dm = (await ConversationService.getConversations()).find(d => d.conversation_id === conversationId);
-      if (dm) handleSelectDm(dm);
-      setDmSearchQuery('');
-      setDmSearchResults([]);
-    } catch (error) {
-      console.error('Error starting DM:', error);
-    }
+  const toggleMemberSelect = (id: string) => {
+    setSelectedMemberIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
+
+  const isChannelActive = (chId: string) => activeChat?.type === 'channel' && activeChat.channelId === chId;
+  const isDmActive = (convId: string) => activeChat?.type === 'dm' && activeChat.conversationId === convId;
+  const isProjectActive = (projId: string) => activeChat?.type === 'project' && activeChat.projectId === projId;
 
   const activeTitle = activeChat?.type === 'channel'
     ? activeChat.channelName
@@ -189,18 +210,13 @@ export default function ChatLayout() {
     ? activeChat.otherUserName
     : activeChat?.projectName ?? '';
 
-  const isChannelActive = (chId: string) => activeChat?.type === 'channel' && activeChat.channelId === chId;
-  const isDmActive = (convId: string) => activeChat?.type === 'dm' && activeChat.conversationId === convId;
-  const isProjectActive = (projId: string) => activeChat?.type === 'project' && activeChat.projectId === projId;
-
-  const sidebarItemStyle = (isActive: boolean, _hoverKey: string | null, itemKey: string) => ({
+  const sidebarItemStyle = (isActive: boolean) => ({
     padding: '7px 12px 7px 12px',
     cursor: 'pointer',
     borderRadius: radius.sm,
-    background: isActive ? tokens.surfaceHover : hoveredItem === itemKey ? tokens.surfaceHover : 'transparent',
+    background: isActive ? tokens.surfaceHover : 'transparent',
     color: isActive ? tokens.textPrimary : tokens.textSecondary,
     marginBottom: 2,
-    position: 'relative' as const,
     fontWeight: isActive ? 600 : 400,
     fontSize: fontSize.base,
     transition: 'all 0.15s ease',
@@ -241,7 +257,6 @@ export default function ChatLayout() {
         maxHeight: '100%',
         overflow: 'hidden',
       }}>
-        {/* Header */}
         <div style={{ padding: '12px 14px', borderBottom: `1px solid ${tokens.borderDefault}` }}>
           <h4 style={{ margin: 0, fontSize: fontSize.md, fontWeight: 600, color: tokens.textPrimary }}>Chats</h4>
         </div>
@@ -278,9 +293,30 @@ export default function ChatLayout() {
                 <input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="channel-name" required style={{ ...sharedStyles.input, marginBottom: 4, fontSize: fontSize.sm }} />
                 <input value={newChannelDesc} onChange={(e) => setNewChannelDesc(e.target.value)} placeholder="Description (optional)" style={{ ...sharedStyles.input, marginBottom: 4, fontSize: fontSize.sm }} />
                 <label style={{ fontSize: fontSize.xs, display: 'flex', alignItems: 'center', gap: 4, color: tokens.textSecondary, marginBottom: 6 }}>
-                  <input type="checkbox" checked={newChannelPrivate} onChange={(e) => setNewChannelPrivate(e.target.checked)} />
+                  <input type="checkbox" checked={newChannelPrivate} onChange={(e) => {
+                    setNewChannelPrivate(e.target.checked);
+                    if (!e.target.checked) setSelectedMemberIds(new Set());
+                  }} />
                   Private channel
                 </label>
+
+                {newChannelPrivate && (
+                  <div style={{ marginBottom: 6, maxHeight: 120, overflowY: 'auto', border: `1px solid ${tokens.borderDefault}`, borderRadius: radius.sm, padding: 4 }}>
+                    <div style={{ fontSize: fontSize.xs, color: tokens.textDim, marginBottom: 4, padding: '0 4px' }}>Select members:</div>
+                    {orgMembers.map(m => (
+                      <label key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px', cursor: 'pointer', borderRadius: radius.sm, fontSize: fontSize.sm, color: tokens.textSecondary }}>
+                        <input type="checkbox" checked={selectedMemberIds.has(m.id)} onChange={() => toggleMemberSelect(m.id)} />
+                        <span style={{ width: 20, height: 20, borderRadius: '50%', background: tokens.surfaceHover, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 600, flexShrink: 0, color: tokens.textPrimary }}>
+                          {(m.email || '?').charAt(0).toUpperCase()}
+                        </span>
+                        <span style={{ flex: 1 }}>{m.display}</span>
+                        {m.role_name && <span style={{ ...sharedStyles.badge('neutral'), fontSize: 9, padding: '1px 4px' }}>{m.role_name}</span>}
+                      </label>
+                    ))}
+                    {orgMembers.length === 0 && <div style={{ fontSize: fontSize.xs, color: tokens.textDim, padding: 4 }}>No members available</div>}
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button type="submit" disabled={creatingChannel} style={{ ...sharedStyles.btnPrimary, fontSize: fontSize.sm, padding: '4px 8px', opacity: creatingChannel ? 0.6 : 1 }}>
                     {creatingChannel ? 'Creating...' : 'Create'}
@@ -295,16 +331,7 @@ export default function ChatLayout() {
                 <div
                   key={ch.id}
                   onClick={() => handleSelectChannel(ch)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelectChannel(ch); } }}
-                  role="button"
-                  tabIndex={0}
-                  style={sidebarItemStyle(
-                    isChannelActive(ch.id),
-                    hoveredItem,
-                    'ch:' + ch.id,
-                  )}
-                  onMouseEnter={() => setHoveredItem('ch:' + ch.id)}
-                  onMouseLeave={() => setHoveredItem(null)}
+                  style={sidebarItemStyle(isChannelActive(ch.id))}
                 >
                   <span style={{ opacity: ch.is_member ? 1 : 0.6 }}>
                     # {ch.name}
@@ -323,83 +350,70 @@ export default function ChatLayout() {
 
           <hr style={sharedStyles.divider} />
 
-          {/* Direct Messages */}
+          {/* Direct Messages — auto-populated with org members */}
           <div style={{ marginBottom: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
               <h5 style={sectionHeaderStyle}>DIRECT MESSAGES</h5>
-              <button onClick={() => setShowNewDm(!showNewDm)} style={plusButtonStyle} title="New Direct Message">+</button>
             </div>
 
-            {showNewDm && (
-              <div style={{
-                marginBottom: 8,
-                padding: 10,
-                background: tokens.surfaceFloat,
-                border: `1px solid ${tokens.borderDefault}`,
-                borderRadius: radius.sm,
-              }}>
-                <input
-                  value={dmSearchQuery}
-                  onChange={(e) => setDmSearchQuery(e.target.value)}
-                  placeholder="Search by email..."
-                  autoFocus
-                  style={{ ...sharedStyles.input, fontSize: fontSize.sm }}
-                />
-                {searching && <p style={{ ...sharedStyles.textMuted, margin: '4px 0 0' }}>Searching...</p>}
-                {dmSearchResults.length > 0 && (
-                  <div style={{ marginTop: 6 }}>
-                    {dmSearchResults.map((r) => (
-                      <div
-                        key={r.id}
-                        onClick={() => handleStartDm(r.id)}
-                        style={{
-                          padding: '6px 8px',
-                          cursor: 'pointer',
-                          borderRadius: radius.sm,
-                          fontSize: fontSize.sm,
-                          color: tokens.textSecondary,
-                          transition: 'background 0.15s',
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = tokens.surfaceHover; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                      >
-                        {r.display} <span style={{ color: tokens.textDim, fontSize: fontSize.xs }}>({r.email})</span>
-                      </div>
-                    ))}
+            {/* Existing conversations */}
+            {conversations.length > 0 && (
+              <div style={{ marginBottom: 4 }}>
+                {conversations.map((dm) => (
+                  <div
+                    key={dm.conversation_id}
+                    onClick={() => handleSelectDm(dm)}
+                    style={sidebarItemStyle(isDmActive(dm.conversation_id))}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+                      <span style={{ width: 22, height: 22, borderRadius: '50%', background: tokens.surfaceHover, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 600, flexShrink: 0, color: tokens.textPrimary }}>
+                        {dm.other_user_display.charAt(0).toUpperCase()}
+                      </span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{dm.other_user_display}</span>
+                    </div>
+                    {unreadCounts['dm:' + dm.conversation_id] && (
+                      <span style={sharedStyles.unreadBadge}>
+                        {unreadCounts['dm:' + dm.conversation_id] > 99 ? '99+' : unreadCounts['dm:' + dm.conversation_id]}
+                      </span>
+                    )}
                   </div>
-                )}
-                {dmSearchQuery && !searching && dmSearchResults.length === 0 && (
-                  <p style={{ ...sharedStyles.textMuted, margin: '4px 0 0' }}>No users found</p>
-                )}
+                ))}
               </div>
             )}
 
-            <div style={{ maxHeight: 120, overflowY: 'auto' }}>
-              {conversations.map((dm) => (
+            {/* All org members — start a new DM by clicking */}
+            <div style={{ marginTop: conversations.length > 0 ? 4 : 0 }}>
+              {orgMembers.filter(m => !conversations.some(dm => dm.other_user_id === m.id)).slice(0, 50).map((m) => (
                 <div
-                  key={dm.conversation_id}
-                  onClick={() => handleSelectDm(dm)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelectDm(dm); } }}
-                  role="button"
-                  tabIndex={0}
-                  style={sidebarItemStyle(
-                    isDmActive(dm.conversation_id),
-                    hoveredItem,
-                    'dm:' + dm.conversation_id,
-                  )}
-                  onMouseEnter={() => setHoveredItem('dm:' + dm.conversation_id)}
-                  onMouseLeave={() => setHoveredItem(null)}
+                  key={m.id}
+                  onClick={() => handleStartDm(m.id)}
+                  style={{
+                    padding: '6px 12px',
+                    cursor: 'pointer',
+                    borderRadius: radius.sm,
+                    color: tokens.textSecondary,
+                    fontSize: fontSize.base,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = tokens.surfaceHover}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                 >
-                  <span>{dm.other_user_display}</span>
-                  {unreadCounts['dm:' + dm.conversation_id] && (
-                    <span style={sharedStyles.unreadBadge}>
-                      {unreadCounts['dm:' + dm.conversation_id] > 99 ? '99+' : unreadCounts['dm:' + dm.conversation_id]}
+                  <span style={{ width: 22, height: 22, borderRadius: '50%', background: tokens.surfaceHover, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 600, flexShrink: 0, color: tokens.textPrimary }}>
+                    {(m.email || '?').charAt(0).toUpperCase()}
+                  </span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{m.display}</span>
+                  {m.role_name && (
+                    <span style={{ ...sharedStyles.badge('neutral'), fontSize: 9, padding: '1px 5px', flexShrink: 0 }}>
+                      {m.role_name}
                     </span>
                   )}
                 </div>
               ))}
-              {conversations.length === 0 && !showNewDm && (
-                <p style={{ ...sharedStyles.textMuted, margin: '5px 0' }}>No conversations yet</p>
+              {orgMembers.length === 0 && conversations.length === 0 && loaded && (
+                <p style={{ ...sharedStyles.textMuted, margin: '5px 0' }}>No members yet</p>
               )}
             </div>
           </div>
@@ -414,16 +428,7 @@ export default function ChatLayout() {
               <div
                 key={p.id}
                 onClick={() => handleSelectProject(p)}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelectProject(p); } }}
-                role="button"
-                tabIndex={0}
-                  style={sidebarItemStyle(
-                    isProjectActive(p.id),
-                    hoveredItem,
-                    'proj:' + p.id,
-                  )}
-                onMouseEnter={() => setHoveredItem('proj:' + p.id)}
-                onMouseLeave={() => setHoveredItem(null)}
+                style={sidebarItemStyle(isProjectActive(p.id))}
               >
                 <span>{p.name}</span>
                 {unreadCounts[p.id] && (
